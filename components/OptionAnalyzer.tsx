@@ -369,9 +369,9 @@ export default function OptionAnalyzer() {
     return { text: "Neutral", color: "#f59e0b" }; // var(--warning)
   }, [totalPCR]);
 
-  const closestMatchPair = useMemo(() => {
+  const closestMatchPair = useMemo<{ call: OptionRow, put: OptionRow, diffPercent: number } | null>(() => {
     if (!activeDataset) return null;
-    let bestMatch = null;
+    let bestMatch: { call: OptionRow, put: OptionRow, diffPercent: number } | null = null;
     let minDiffPercent = Infinity;
 
     const otmCalls = activeDataset.data.filter(d => d.strike > activeDataset.atm && d.callOI > 5000);
@@ -562,7 +562,7 @@ export default function OptionAnalyzer() {
           {["Overview", "CustomLab", "Ratios", "SmartMoney", "Historical"].map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab as any)}
+              onClick={() => setActiveTab(tab as "Overview" | "Ratios" | "SmartMoney" | "Historical" | "CustomLab")}
               className={`px-6 py-3 rounded-lg font-bold text-sm transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-gradient-to-r from-[#3b82f6] to-[#8b5cf6] text-white shadow-lg' : 'text-[var(--text-secondary)] hover:text-white hover:bg-white/5'}`}
             >
               {tab === "CustomLab" ? "Custom Strategy Lab" : tab === "Ratios" ? "Ratio Spread Builder" : tab === "SmartMoney" ? "AI & Heatmap" : tab === "Historical" ? "Compare Expiries" : tab}
@@ -654,7 +654,7 @@ export default function OptionAnalyzer() {
                     <RechartsTooltip 
                       contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', padding: '15px' }}
                       itemStyle={{ color: '#fff', fontWeight: 'bold' }}
-                      formatter={(value: number) => [formatNum(value), ""]}
+                      formatter={(value: any) => [formatNum(value), ""]}
                       labelFormatter={(label) => `Strike: ${label}`}
                     />
                     <Bar dataKey="putOI" fill="#10b981" name="Put OI" radius={[4, 4, 0, 0]} barSize={24} />

@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model content_sources {
+  id        String      @id
+  type      String
+  raw_text  String?
+  url       String?
+  isParsed  Boolean     @default(false)
+  createdAt DateTime    @default(now())
+  questions questions[]
+}
+
+model plans {
+  id          String   @id
+  name        String   @unique
+  price       Float    @default(0)
+  description String?
+  createdAt   DateTime @default(now())
+  users       users[]
+}
+
+model questions {
+  id              String           @id
+  contentSourceId String?
+  category        String           @default("GK")
+  type            String
+  question        String
+  options         Json
+  correct_answer  String?
+  createdAt       DateTime         @default(now())
+  content_sources content_sources? @relation(fields: [contentSourceId], references: [id])
+
+  @@index([contentSourceId])
+}
+
+model quiz_attempts {
+  id        String   @id
+  userId    String
+  score     Int      @default(0)
+  timeTaken Float
+  createdAt DateTime @default(now())
+  users     users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model users {
+  id                  String                @id
+  name                String?
+  email               String                @unique
+  password            String?
+  role                Role                  @default(USER)
+  planId              String?
+  walletBalance       Float                 @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime
+  quiz_attempts       quiz_attempts[]
+  plans               plans?                @relation(fields: [planId], references: [id])
+  wallet_transactions wallet_transactions[]
+}
+
+model wallet_transactions {
+  id          String   @id
+  userId      String
+  amount      Float
+  type        TxnType
+  description String
+  createdAt   DateTime @default(now())
+  users       users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TxnType {
+  CREDIT
+  DEBIT
+}

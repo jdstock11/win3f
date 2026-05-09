@@ -283,7 +283,7 @@ export default function CustomStrategyBuilder({ activeDataset }: { activeDataset
                   <RechartsTooltip 
                     contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff' }}
                     labelFormatter={(label) => `Spot Price: ₹${label}`}
-                    formatter={(value: number) => [<span key="pnl" className={value >= 0 ? "text-[#10b981] font-bold" : "text-[#ef4444] font-bold"}>₹{value}</span>, "Exp P&L"]}
+                    formatter={(value: any) => [<span key="pnl" className={value >= 0 ? "text-[#10b981] font-bold" : "text-[#ef4444] font-bold"}>₹{value}</span>, "Exp P&L"]}
                   />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
                   <ReferenceLine x={spotPrice} stroke="#8b5cf6" strokeDasharray="5 5" label={{ value: 'Spot', position: 'insideTopLeft', fill: '#8b5cf6', fontSize: 12 }} />
