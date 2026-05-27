@@ -3,21 +3,24 @@
 import React, { useState, useMemo } from "react";
 import { 
   TrendingUp, TrendingDown, Layers, Percent, ShieldAlert,
-  BarChart2, Target, Zap, Info, Filter, ArrowRight, BrainCircuit, AlertTriangle
+  BarChart2, Target, Zap, Info, Filter, ArrowRight, BrainCircuit, AlertTriangle, Clock
 } from "lucide-react";
 import { 
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, 
   Tooltip as RechartsTooltip, ReferenceLine, ResponsiveContainer, Area
 } from "recharts";
+import { calculateGreeks, estimateTimeToExpiry } from "../lib/greeks";
 
 export interface OptionRow {
   strike: number;
   callOI: number;
   callVol: number;
   callLTP: number;
+  callIV?: number;
   putOI: number;
   putVol: number;
   putLTP: number;
+  putIV?: number;
 }
 
 export interface Dataset {
@@ -34,12 +37,14 @@ export interface Leg {
   action: 'Buy' | 'Sell';
   lots: number;
   ltp: number;
+  expiryStr?: string;
+  iv?: number;
 }
 
 interface Strategy {
   id: string;
   name: string;
-  type: 'Bullish' | 'Bearish' | 'Neutral' | 'Vol Expansion';
+  type: 'Bullish' | 'Bearish' | 'Neutral' | 'Vol Expansion' | 'Calendar';
   legs: Leg[];
   reasoning: string;
   // Computed Analytics
@@ -53,6 +58,7 @@ interface Strategy {
   rr: number; 
   isUnlimitedLoss: boolean;
   payoffData: { price: number; pnl: number }[];
+  netGreeks: { delta: number, gamma: number, theta: number, vega: number };
 }
 
 export const getLotSize = (symbol: string) => {
@@ -65,17 +71,17 @@ export const getLotSize = (symbol: string) => {
   return 50; // Fallback
 };
 
-// Advanced Payoff Engine (Mathematical Simulation)
+// Advanced Payoff Engine
 export const simulatePayoff = (legs: Leg[], spot: number, lotSize: number) => {
   const data = [];
-  const range = spot * 0.1; // Evaluate ±10% range for wide visibility
-  const step = range / 200; // 400 total data points for perfect precision curve
+  const range = spot * 0.1;
+  const step = range / 200; 
   
   for(let price = spot - range; price <= spot + range; price += step) {
     let pnl = 0;
     legs.forEach(leg => {
+      // Simplified intrinsic payoff assuming all expire today. For Calendar, this is an approximation.
       const intrinsic = leg.type === 'CE' ? Math.max(0, price - leg.strike) : Math.max(0, leg.strike - price);
-      // PNL = (Action value) * lots * lotSize
       const legPnl = leg.action === 'Buy' ? (intrinsic - leg.ltp) : (leg.ltp - intrinsic);
       pnl += legPnl * leg.lots * lotSize;
     });
@@ -93,64 +99,64 @@ export const analyzeStrategy = (legs: Leg[], spot: number, lotSize: number): Omi
   let breakevens: number[] = [];
   let netPremiumNum = 0;
 
-  // 1. Calculate Net Premium (Total Credit or Debit)
+  // Greeks accumulation
+  let netDelta = 0, netGamma = 0, netTheta = 0, netVega = 0;
+  
   legs.forEach(leg => {
     const value = leg.ltp * leg.lots * lotSize;
     if (leg.action === 'Sell') netPremiumNum += value;
     if (leg.action === 'Buy') netPremiumNum -= value;
+
+    const tte = estimateTimeToExpiry(leg.expiryStr || "");
+    const iv = (leg.iv && leg.iv > 0) ? leg.iv / 100 : 0.2; // fallback to 20% IV
+    const greeks = calculateGreeks(spot, leg.strike, tte, 0.05, iv, leg.type);
+    
+    const multiplier = leg.action === 'Buy' ? 1 : -1;
+    netDelta += greeks.delta * multiplier * leg.lots * lotSize;
+    netGamma += greeks.gamma * multiplier * leg.lots * lotSize;
+    netTheta += greeks.theta * multiplier * leg.lots * lotSize;
+    netVega += greeks.vega * multiplier * leg.lots * lotSize;
   });
 
-  // 2. Scan for Max Profit and Max Loss
   points.forEach(p => {
     if (p.pnl > maxProfit) maxProfit = p.pnl;
     if (p.pnl < maxLoss) maxLoss = p.pnl;
   });
 
-  // 3. Detect Infinite Slopes (Unlimited Risk / Reward)
   const leftSlope = points[1].pnl - points[0].pnl;
   const rightSlope = points[points.length - 1].pnl - points[points.length - 2].pnl;
 
   const isUnlimitedLoss = (leftSlope > 10 && points[0].pnl < -1000) || (rightSlope < -10 && points[points.length-1].pnl < -1000);
   const isUnlimitedProfit = (leftSlope < -10 && points[0].pnl > 1000) || (rightSlope > 10 && points[points.length-1].pnl > 1000);
 
-  // 4. Exact Mathematical Breakeven Detection
   for(let i = 1; i < points.length; i++) {
     if ((points[i-1].pnl <= 0 && points[i].pnl > 0) || (points[i-1].pnl >= 0 && points[i].pnl < 0)) {
       const p1 = points[i-1];
       const p2 = points[i];
       const ratio = Math.abs(p1.pnl) / (Math.abs(p1.pnl) + Math.abs(p2.pnl) || 1);
       const exactPrice = Math.round(p1.price + (p2.price - p1.price) * ratio);
-      // Prevent duplicates from rounding
       if (!breakevens.includes(exactPrice)) {
         breakevens.push(exactPrice);
       }
     }
   }
 
-  // 5. Margin Approximation Engine
   let margin = 0;
-  let hasNakedShort = false;
   legs.forEach(leg => {
-    if (leg.action === 'Sell') {
-      margin += 110000 * leg.lots; // Base span margin for naked short
-      hasNakedShort = true;
-    }
+    if (leg.action === 'Sell') margin += 110000 * leg.lots;
   });
-  // Margin Hedging Benefit (If bought options exist, margin drastically reduces)
   const longLegs = legs.filter(l => l.action === 'Buy').reduce((acc, leg) => acc + leg.lots, 0);
   const shortLegs = legs.filter(l => l.action === 'Sell').reduce((acc, leg) => acc + leg.lots, 0);
   if (longLegs > 0 && shortLegs > 0) {
-    if (longLegs >= shortLegs) margin = 35000 * shortLegs; // Fully hedged
-    else margin = (35000 * longLegs) + (110000 * (shortLegs - longLegs)); // Partially hedged
+    if (longLegs >= shortLegs) margin = 35000 * shortLegs;
+    else margin = (35000 * longLegs) + (110000 * (shortLegs - longLegs));
   }
 
-  // 6. POP (Probability of Profit) Heuristic Engine
-  // Estimates POP based on breakeven distance relative to typical volatility
   let pop = 50;
-  if (netPremiumNum > 0 && isUnlimitedLoss) pop = 70; // High probability, unlimited risk (Ratio spreads)
-  else if (netPremiumNum > 0 && !isUnlimitedLoss) pop = 65; // Credit spreads
-  else if (netPremiumNum < 0 && isUnlimitedProfit) pop = 35; // Debit spreads
-  else if (netPremiumNum > 0 && breakevens.length > 1) pop = 75; // Iron condors
+  if (netPremiumNum > 0 && isUnlimitedLoss) pop = 70;
+  else if (netPremiumNum > 0 && !isUnlimitedLoss) pop = 65;
+  else if (netPremiumNum < 0 && isUnlimitedProfit) pop = 35;
+  else if (netPremiumNum > 0 && breakevens.length > 1) pop = 75;
 
   return {
     netPremium: netPremiumNum,
@@ -162,18 +168,19 @@ export const analyzeStrategy = (legs: Leg[], spot: number, lotSize: number): Omi
     pop,
     rr: isUnlimitedLoss ? 0 : Math.abs(maxProfit / maxLoss),
     isUnlimitedLoss,
-    payoffData: points
+    payoffData: points,
+    netGreeks: { delta: netDelta, gamma: netGamma, theta: netTheta, vega: netVega }
   };
 };
 
-export default function StrategyEngine({ activeDataset }: { activeDataset: Dataset | null }) {
+export default function StrategyEngine({ activeDataset, compareDataset }: { activeDataset: Dataset | null, compareDataset?: Dataset | null }) {
   const [filterType, setFilterType] = useState<string>("All");
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
 
   const strategies = useMemo(() => {
     if (!activeDataset || !activeDataset.data.length) return [];
     
-    const { atm, data, symbol } = activeDataset;
+    const { atm, data, symbol, expiry } = activeDataset;
     const lotSize = getLotSize(symbol);
     const atmData = data.find(d => d.strike === atm);
     if (!atmData) return [];
@@ -184,97 +191,113 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
 
     const getStrike = (offset: number) => data.find(d => d.strike === strikes[atmIndex + offset]);
 
-    const otmCall1 = getStrike(1); // Slightly OTM
-    const otmCall2 = getStrike(2); // Far OTM
+    const otmCall1 = getStrike(1);
+    const otmCall2 = getStrike(2);
     const otmCall4 = getStrike(4);
     const otmPut1 = getStrike(-1);
     const otmPut2 = getStrike(-2);
     const otmPut4 = getStrike(-4);
 
-    // 1. Bear Call Spread
+    // Standard Spreads
     if (atmData && otmCall2) {
       const legs: Leg[] = [
-        { strike: atm, type: 'CE', action: 'Sell', lots: 1, ltp: atmData.callLTP },
-        { strike: otmCall2.strike, type: 'CE', action: 'Buy', lots: 1, ltp: otmCall2.callLTP }
+        { strike: atm, type: 'CE', action: 'Sell', lots: 1, ltp: atmData.callLTP, expiryStr: expiry, iv: atmData.callIV },
+        { strike: otmCall2.strike, type: 'CE', action: 'Buy', lots: 1, ltp: otmCall2.callLTP, expiryStr: expiry, iv: otmCall2.callIV }
       ];
       strats.push({
-        id: 'bear_call',
-        name: "Bear Call Spread",
-        type: "Bearish",
-        legs,
+        id: 'bear_call', name: "Bear Call Spread", type: "Bearish", legs,
         reasoning: "Strictly defined risk credit spread. Best for mildly bearish or neutral setups.",
         ...analyzeStrategy(legs, atm, lotSize)
       });
     }
 
-    // 2. 1x2 Call Ratio Spread
-    if (atmData && otmCall2) {
-      const legs: Leg[] = [
-        { strike: atm, type: 'CE', action: 'Buy', lots: 1, ltp: atmData.callLTP },
-        { strike: otmCall2.strike, type: 'CE', action: 'Sell', lots: 2, ltp: otmCall2.callLTP }
-      ];
-      strats.push({
-        id: 'call_ratio',
-        name: "1x2 Call Ratio Spread",
-        type: "Neutral", // Often used neutrally or slightly bullish
-        legs,
-        reasoning: "Excellent net credit setup peaking at short strike. WARNING: Carries unlimited risk beyond upper breakeven.",
-        ...analyzeStrategy(legs, atm, lotSize)
-      });
-    }
-
-    // 3. Bull Put Spread
     if (atmData && otmPut2) {
       const legs: Leg[] = [
-        { strike: atm, type: 'PE', action: 'Sell', lots: 1, ltp: atmData.putLTP },
-        { strike: otmPut2.strike, type: 'PE', action: 'Buy', lots: 1, ltp: otmPut2.putLTP }
+        { strike: atm, type: 'PE', action: 'Sell', lots: 1, ltp: atmData.putLTP, expiryStr: expiry, iv: atmData.putIV },
+        { strike: otmPut2.strike, type: 'PE', action: 'Buy', lots: 1, ltp: otmPut2.putLTP, expiryStr: expiry, iv: otmPut2.putIV }
       ];
       strats.push({
-        id: 'bull_put',
-        name: "Bull Put Spread",
-        type: "Bullish",
-        legs,
+        id: 'bull_put', name: "Bull Put Spread", type: "Bullish", legs,
         reasoning: "Strictly defined risk credit spread. Collect premium above put floor.",
         ...analyzeStrategy(legs, atm, lotSize)
       });
     }
 
-    // 4. 1x2 Put Ratio Spread
-    if (atmData && otmPut2) {
-      const legs: Leg[] = [
-        { strike: atm, type: 'PE', action: 'Buy', lots: 1, ltp: atmData.putLTP },
-        { strike: otmPut2.strike, type: 'PE', action: 'Sell', lots: 2, ltp: otmPut2.putLTP }
-      ];
-      strats.push({
-        id: 'put_ratio',
-        name: "1x2 Put Ratio Spread",
-        type: "Neutral",
-        legs,
-        reasoning: "Collects net credit with maximum profit at lower short strike. WARNING: Unlimited downside risk.",
-        ...analyzeStrategy(legs, atm, lotSize)
-      });
-    }
-
-    // 5. Iron Condor
+    // Iron Condor
     if (otmCall2 && otmCall4 && otmPut2 && otmPut4) {
       const legs: Leg[] = [
-        { strike: otmCall2.strike, type: 'CE', action: 'Sell', lots: 1, ltp: otmCall2.callLTP },
-        { strike: otmCall4.strike, type: 'CE', action: 'Buy', lots: 1, ltp: otmCall4.callLTP },
-        { strike: otmPut2.strike, type: 'PE', action: 'Sell', lots: 1, ltp: otmPut2.putLTP },
-        { strike: otmPut4.strike, type: 'PE', action: 'Buy', lots: 1, ltp: otmPut4.putLTP }
+        { strike: otmCall2.strike, type: 'CE', action: 'Sell', lots: 1, ltp: otmCall2.callLTP, expiryStr: expiry, iv: otmCall2.callIV },
+        { strike: otmCall4.strike, type: 'CE', action: 'Buy', lots: 1, ltp: otmCall4.callLTP, expiryStr: expiry, iv: otmCall4.callIV },
+        { strike: otmPut2.strike, type: 'PE', action: 'Sell', lots: 1, ltp: otmPut2.putLTP, expiryStr: expiry, iv: otmPut2.putIV },
+        { strike: otmPut4.strike, type: 'PE', action: 'Buy', lots: 1, ltp: otmPut4.putLTP, expiryStr: expiry, iv: otmPut4.putIV }
       ];
       strats.push({
-        id: 'iron_condor',
-        name: "Iron Condor",
-        type: "Neutral",
-        legs,
+        id: 'iron_condor', name: "Iron Condor", type: "Neutral", legs,
         reasoning: "Non-directional delta neutral strategy. Profit from range-bound price action and theta decay.",
         ...analyzeStrategy(legs, atm, lotSize)
       });
     }
 
+    // Vol Expansion
+    if (atmData) {
+      const legs: Leg[] = [
+        { strike: atm, type: 'CE', action: 'Buy', lots: 1, ltp: atmData.callLTP, expiryStr: expiry, iv: atmData.callIV },
+        { strike: atm, type: 'PE', action: 'Buy', lots: 1, ltp: atmData.putLTP, expiryStr: expiry, iv: atmData.putIV }
+      ];
+      strats.push({
+        id: 'long_straddle', name: "Long Straddle", type: "Vol Expansion", legs,
+        reasoning: "High Vega exposure. Profits from explosive moves in either direction or an increase in Implied Volatility.",
+        ...analyzeStrategy(legs, atm, lotSize)
+      });
+    }
+
+    // CALENDAR SPREADS
+    if (compareDataset && compareDataset.data.length > 0) {
+      const nextData = compareDataset.data;
+      const nextAtmCall = nextData.find(d => d.strike === atm);
+      const nextAtmPut = nextData.find(d => d.strike === atm);
+
+      if (atmData && nextAtmCall) {
+        const legs: Leg[] = [
+          { strike: atm, type: 'CE', action: 'Sell', lots: 1, ltp: atmData.callLTP, expiryStr: expiry, iv: atmData.callIV },
+          { strike: atm, type: 'CE', action: 'Buy', lots: 1, ltp: nextAtmCall.callLTP, expiryStr: compareDataset.expiry, iv: nextAtmCall.callIV }
+        ];
+        strats.push({
+          id: 'long_calendar_call', name: "Long Call Calendar", type: "Calendar", legs,
+          reasoning: "Positive Theta and positive Vega. Profits if underlying stays near strike and IV increases.",
+          ...analyzeStrategy(legs, atm, lotSize)
+        });
+      }
+
+      if (atmData && nextAtmPut) {
+         const legs: Leg[] = [
+           { strike: atm, type: 'PE', action: 'Sell', lots: 1, ltp: atmData.putLTP, expiryStr: expiry, iv: atmData.putIV },
+           { strike: atm, type: 'PE', action: 'Buy', lots: 1, ltp: nextAtmPut.putLTP, expiryStr: compareDataset.expiry, iv: nextAtmPut.putIV }
+         ];
+         strats.push({
+           id: 'long_calendar_put', name: "Long Put Calendar", type: "Calendar", legs,
+           reasoning: "Profits from rapid decay of the short front-month option while holding longer-dated protection.",
+           ...analyzeStrategy(legs, atm, lotSize)
+         });
+      }
+
+      // Diagonal Spread
+      const nextOtmCall = nextData.find(d => d.strike === (otmCall2?.strike || atm));
+      if (atmData && nextOtmCall) {
+        const legs: Leg[] = [
+          { strike: atm, type: 'CE', action: 'Sell', lots: 1, ltp: atmData.callLTP, expiryStr: expiry, iv: atmData.callIV },
+          { strike: nextOtmCall.strike, type: 'CE', action: 'Buy', lots: 1, ltp: nextOtmCall.callLTP, expiryStr: compareDataset.expiry, iv: nextOtmCall.callIV }
+        ];
+        strats.push({
+          id: 'bull_diagonal', name: "Bull Call Diagonal", type: "Calendar", legs,
+          reasoning: "Combination of a calendar and vertical spread. Directional bias with theta advantage.",
+          ...analyzeStrategy(legs, atm, lotSize)
+        });
+      }
+    }
+
     return strats.sort((a,b) => b.pop - a.pop);
-  }, [activeDataset]);
+  }, [activeDataset, compareDataset]);
 
   const filteredStrategies = useMemo(() => {
     if (filterType === "All") return strategies;
@@ -303,7 +326,7 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
           </h3>
           
           <div className="flex flex-wrap gap-2 mb-6">
-            {["All", "Bullish", "Bearish", "Neutral", "Credit"].map(f => (
+            {["All", "Calendar", "Bullish", "Bearish", "Neutral", "Vol Expansion"].map(f => (
               <button 
                 key={f}
                 onClick={() => setFilterType(f)}
@@ -328,12 +351,12 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                   </h4>
                 </div>
                 <div className="flex gap-2 mb-3">
-                  <span className={`text-xs font-bold px-2 py-1 rounded ${strat.type === 'Bullish' ? 'bg-[#10b981]/20 text-[#10b981]' : strat.type === 'Bearish' ? 'bg-[#ef4444]/20 text-[#ef4444]' : 'bg-[#3b82f6]/20 text-[#3b82f6]'}`}>
+                  <span className={`text-xs font-bold px-2 py-1 rounded ${strat.type === 'Bullish' ? 'bg-[#10b981]/20 text-[#10b981]' : strat.type === 'Bearish' ? 'bg-[#ef4444]/20 text-[#ef4444]' : strat.type === 'Calendar' ? 'bg-[#f59e0b]/20 text-[#f59e0b]' : 'bg-[#3b82f6]/20 text-[#3b82f6]'}`}>
                     {strat.type}
                   </span>
                   {strat.isUnlimitedLoss && (
                     <span className="text-xs font-bold px-2 py-1 rounded bg-[#ef4444]/20 text-[#ef4444] flex items-center gap-1">
-                      <AlertTriangle size={10} /> Unlimited Risk
+                      <AlertTriangle size={10} /> Unl. Risk
                     </span>
                   )}
                 </div>
@@ -346,6 +369,9 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                 </div>
               </div>
             ))}
+            {filteredStrategies.length === 0 && (
+              <div className="text-sm text-gray-400 p-4 text-center">No strategies found. (If you want Calendar spreads, ensure you have selected a "Compare With" dataset).</div>
+            )}
           </div>
         </div>
       </div>
@@ -387,6 +413,7 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                 <thead className="bg-[#161925] border-b border-white/5 text-gray-400">
                   <tr>
                     <th className="p-4 font-medium">Action</th>
+                    <th className="p-4 font-medium">Expiry</th>
                     <th className="p-4 font-medium">Strike</th>
                     <th className="p-4 font-medium">Lots</th>
                     <th className="p-4 font-medium">Qty</th>
@@ -405,6 +432,7 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                             {leg.action.toUpperCase()}
                           </span>
                         </td>
+                        <td className="p-4 font-bold text-[#f59e0b]"><Clock size={12} className="inline mr-1"/>{leg.expiryStr}</td>
                         <td className="p-4 font-bold text-white">{leg.strike} {leg.type}</td>
                         <td className="p-4 text-gray-300">{leg.lots}</td>
                         <td className="p-4 text-gray-300">{leg.lots * lotSize}</td>
@@ -418,13 +446,34 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                 </tbody>
                 <tfoot className="bg-[#1a1d2d] border-t border-white/10">
                   <tr>
-                    <td colSpan={5} className="p-4 text-right font-bold text-gray-400">Net Execution Premium:</td>
+                    <td colSpan={6} className="p-4 text-right font-bold text-gray-400">Net Execution Premium:</td>
                     <td className={`p-4 text-right font-bold text-lg ${selectedStrategy.netPremium > 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
                       {selectedStrategy.netPremium > 0 ? 'Net Credit' : 'Net Debit'}: ₹{Math.abs(selectedStrategy.netPremium).toFixed(2)}
                     </td>
                   </tr>
                 </tfoot>
               </table>
+            </div>
+
+            {/* GREEKS EXPOSURE */}
+            <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Portfolio Greeks Exposure</h4>
+            <div className="grid grid-cols-4 gap-4 mb-8">
+              <div className="bg-[#161925] p-4 rounded-xl border border-[var(--border-color)]">
+                <p className="text-xs text-gray-500 mb-1">Net Delta</p>
+                <p className={`font-bold text-lg ${selectedStrategy.netGreeks.delta > 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>{selectedStrategy.netGreeks.delta.toFixed(2)}</p>
+              </div>
+              <div className="bg-[#161925] p-4 rounded-xl border border-[var(--border-color)]">
+                <p className="text-xs text-gray-500 mb-1">Net Gamma</p>
+                <p className={`font-bold text-lg ${selectedStrategy.netGreeks.gamma > 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>{selectedStrategy.netGreeks.gamma.toFixed(4)}</p>
+              </div>
+              <div className="bg-[#161925] p-4 rounded-xl border border-[var(--border-color)]">
+                <p className="text-xs text-gray-500 mb-1">Net Theta</p>
+                <p className={`font-bold text-lg ${selectedStrategy.netGreeks.theta > 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>{selectedStrategy.netGreeks.theta.toFixed(2)} / day</p>
+              </div>
+              <div className="bg-[#161925] p-4 rounded-xl border border-[var(--border-color)]">
+                <p className="text-xs text-gray-500 mb-1">Net Vega</p>
+                <p className={`font-bold text-lg ${selectedStrategy.netGreeks.vega > 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>{selectedStrategy.netGreeks.vega.toFixed(2)} / 1% IV</p>
+              </div>
             </div>
 
             {/* METRICS GRID */}
@@ -493,7 +542,6 @@ export default function StrategyEngine({ activeDataset }: { activeDataset: Datas
                     </linearGradient>
                   </defs>
                   
-                  {/* The exact payoff shape curve */}
                   <Area 
                     type="linear" 
                     dataKey="pnl" 

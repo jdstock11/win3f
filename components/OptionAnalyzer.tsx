@@ -3,44 +3,20 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
-import { 
-  Upload, TrendingUp, TrendingDown, ArrowRight, Activity, 
-  Crosshair, Download, BrainCircuit, Search, Percent, 
+import {
+  Upload, TrendingUp, TrendingDown, ArrowRight, Activity,
+  Crosshair, Download, BrainCircuit, Search, Percent,
   BarChart2, Lightbulb, Camera, Database, FileSpreadsheet,
-  Calendar, Layers, Clock, Settings, Maximize2, RefreshCw, X, FolderOpen, CloudLightning
+  Calendar, Layers, Clock, Settings, Maximize2, RefreshCw, X, FolderOpen, CloudLightning, ShieldAlert
 } from "lucide-react";
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-  Legend, ResponsiveContainer, ComposedChart, Line
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  Legend, ResponsiveContainer, ComposedChart, Line, AreaChart, Area, LineChart
 } from "recharts";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import StrategyEngine from "./StrategyEngine";
+import StrategyEngine, { OptionRow, Dataset } from "./StrategyEngine";
 import CustomStrategyBuilder from "./CustomStrategyBuilder";
-
-// --- Interfaces ---
-
-interface OptionRow {
-  strike: number;
-  callOI: number;
-  callVol: number;
-  callLTP: number;
-  putOI: number;
-  putVol: number;
-  putLTP: number;
-}
-
-interface Dataset {
-  id: string;
-  filename: string;
-  symbol: string;
-  expiry: string;
-  uploadTime: number;
-  data: OptionRow[];
-  atm: number;
-  totalCallOI: number;
-  totalPutOI: number;
-}
 
 // --- Helper Components ---
 
@@ -63,8 +39,8 @@ const CustomSelect = ({ options, value, onChange, placeholder, label, icon: Icon
 
   return (
     <div ref={wrapperRef} className="relative w-full">
-      {label && <label className="block mb-2 text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">{Icon && <Icon size={14}/>} {label}</label>}
-      <div 
+      {label && <label className="block mb-2 text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">{Icon && <Icon size={14} />} {label}</label>}
+      <div
         className="input-glass w-full cursor-pointer flex justify-between items-center bg-[#1a1d2d]/80 hover:bg-[#1a1d2d] py-3 px-4 transition-all"
         onClick={() => setIsOpen(!isOpen)}
       >
@@ -77,8 +53,8 @@ const CustomSelect = ({ options, value, onChange, placeholder, label, icon: Icon
             <div className="p-3 border-b border-[var(--border-color)] bg-[#161925] sticky top-0 z-10">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-[var(--text-secondary)]" size={16} />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="w-full bg-black/40 text-white rounded-lg p-2 pl-10 text-sm outline-none border border-[var(--border-color)] focus:border-[var(--accent-blue)] transition-colors"
                   placeholder="Search..."
                   value={searchTerm}
@@ -91,7 +67,7 @@ const CustomSelect = ({ options, value, onChange, placeholder, label, icon: Icon
           )}
           <div className="overflow-y-auto custom-scrollbar p-2">
             {filtered.map((opt: any) => (
-              <div 
+              <div
                 key={opt.value}
                 className={`p-3 my-1 rounded-lg hover:bg-[var(--accent-blue)]/80 hover:text-white cursor-pointer text-sm transition-all ${value === opt.value ? 'bg-[var(--accent-blue)] text-white font-medium shadow-md' : 'text-[var(--text-primary)]'}`}
                 onClick={() => {
@@ -125,27 +101,9 @@ export default function OptionAnalyzer() {
   // Active Data State (derived)
   const activeDataset = useMemo(() => datasets.find(d => d.id === activeDatasetId) || null, [datasets, activeDatasetId]);
   const compareDataset = useMemo(() => datasets.find(d => d.id === compareDatasetId) || null, [datasets, compareDatasetId]);
-  
+
   // UI State
-  const [activeTab, setActiveTab] = useState<"Overview" | "Ratios" | "SmartMoney" | "Historical" | "CustomLab">("Overview");
-  const [filterMode, setFilterMode] = useState<"All" | "ATM" | "OTM" | "ITM">("All");
-
-  // Call/Put State
-  const [callBase, setCallBase] = useState<number | "">("");
-  const [callTarget, setCallTarget] = useState<number | "">("");
-  const [putBase, setPutBase] = useState<number | "">("");
-  const [putTarget, setPutTarget] = useState<number | "">("");
-
-  // --- Data Sync ---
-  useEffect(() => {
-    if (activeDataset && activeDataset.data.length > 0) {
-      const atmIndex = activeDataset.data.findIndex(d => d.strike === activeDataset.atm);
-      setCallBase(activeDataset.atm);
-      setCallTarget(activeDataset.data[Math.min(atmIndex + 2, activeDataset.data.length - 1)]?.strike || activeDataset.atm);
-      setPutBase(activeDataset.atm);
-      setPutTarget(activeDataset.data[Math.max(atmIndex - 2, 0)]?.strike || activeDataset.atm);
-    }
-  }, [activeDataset]);
+  const [activeTab, setActiveTab] = useState<"Overview" | "StrategyEngine" | "SmartMoney" | "Rollover" | "CustomLab">("Overview");
 
   // --- Parsing & Data Management ---
 
@@ -158,10 +116,10 @@ export default function OptionAnalyzer() {
   const extractMetadata = (filename: string) => {
     let symbol = "UNKNOWN";
     let expiry = "UNKNOWN EXPIRY";
-    
+
     const upperName = filename.toUpperCase();
-    
-    // Auto detect standard symbols (ordered by length descending to prevent partial match bug, e.g. NIFTY masking BANKNIFTY)
+
+    // Auto detect standard symbols
     const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY"];
     for (const s of symbols) {
       if (upperName.includes(s)) {
@@ -170,12 +128,10 @@ export default function OptionAnalyzer() {
       }
     }
 
-    // Attempt to extract expiry like 12-MAY-2026 or 12MAY26
     const dateMatch = upperName.match(/(\d{1,2}[A-Z]{3}\d{2,4})|(\d{1,2}-[A-Z]{3}-\d{2,4})/);
     if (dateMatch) {
       expiry = dateMatch[0];
     } else {
-      // Create a dummy expiry if none found based on date
       expiry = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-').toUpperCase();
     }
 
@@ -186,7 +142,7 @@ export default function OptionAnalyzer() {
     const parsedData: OptionRow[] = [];
     let tcOI = 0;
     let tpOI = 0;
-    
+
     for (let i = 2; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.length < 21) continue;
@@ -201,8 +157,10 @@ export default function OptionAnalyzer() {
         strike,
         callOI,
         callVol: parseNumber(row[3]),
+        callIV: parseNumber(row[4]),
         callLTP: parseNumber(row[5]),
         putLTP: parseNumber(row[17]),
+        putIV: parseNumber(row[18]),
         putVol: parseNumber(row[19]),
         putOI,
       });
@@ -230,25 +188,15 @@ export default function OptionAnalyzer() {
     const { symbol, expiry } = extractMetadata(filename);
     const newDataset: Dataset = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      filename,
       symbol,
       expiry,
-      uploadTime: Date.now(),
       data: parsedData,
       atm: currentAtm,
-      totalCallOI: tcOI,
-      totalPutOI: tpOI
     };
 
     setDatasets(prev => [...prev, newDataset]);
-    setActiveDatasetId(newDataset.id);
-    
-    // Setup defaults for ratio builder
-    const atmIndex = parsedData.findIndex(d => d.strike === currentAtm);
-    setCallBase(currentAtm);
-    setCallTarget(parsedData[Math.min(atmIndex + 2, parsedData.length - 1)]?.strike || currentAtm);
-    setPutBase(currentAtm);
-    setPutTarget(parsedData[Math.max(atmIndex - 2, 0)]?.strike || currentAtm);
+    if (!activeDatasetId) setActiveDatasetId(newDataset.id);
+    else if (!compareDatasetId) setCompareDatasetId(newDataset.id);
   };
 
   const fetchLiveNSEData = async (symbol: string = "NIFTY") => {
@@ -257,49 +205,59 @@ export default function OptionAnalyzer() {
       const res = await fetch(`/api/nse/option-chain?symbol=${symbol}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      
+
       const expiryDates = json.records.expiryDates;
-      const nearestExpiry = expiryDates[0];
-      const rawData = json.records.data.filter((d: any) => d.expiryDate === nearestExpiry);
       
-      let currentAtm = json.records.underlyingValue;
-      let minDiff = Infinity;
+      // Fetch both current and next expiry
+      const nearestExpiry = expiryDates[0];
+      const nextExpiry = expiryDates[1] || expiryDates[0];
+      
+      const rawData = json.records.data;
+      
+      const processExpiry = (exp: string, idPrefix: string) => {
+        const filteredData = rawData.filter((d: any) => d.expiryDate === exp);
+        let currentAtm = json.records.underlyingValue;
+        let minDiff = Infinity;
 
-      const parsedData: OptionRow[] = rawData.map((d: any) => {
-        const row = {
-          strike: d.strikePrice,
-          callOI: d.CE?.openInterest || 0,
-          callVol: d.CE?.totalTradedVolume || 0,
-          callLTP: d.CE?.lastPrice || 0,
-          putOI: d.PE?.openInterest || 0,
-          putVol: d.PE?.totalTradedVolume || 0,
-          putLTP: d.PE?.lastPrice || 0
+        const parsedData: OptionRow[] = filteredData.map((d: any) => {
+          const row = {
+            strike: d.strikePrice,
+            callOI: d.CE?.openInterest || 0,
+            callVol: d.CE?.totalTradedVolume || 0,
+            callIV: d.CE?.impliedVolatility || 0,
+            callLTP: d.CE?.lastPrice || 0,
+            putOI: d.PE?.openInterest || 0,
+            putVol: d.PE?.totalTradedVolume || 0,
+            putIV: d.PE?.impliedVolatility || 0,
+            putLTP: d.PE?.lastPrice || 0
+          };
+          const diff = Math.abs(currentAtm - d.strikePrice);
+          if (diff < minDiff) {
+            minDiff = diff;
+            currentAtm = d.strikePrice;
+          }
+          return row;
+        }).filter((r: OptionRow) => r.callLTP > 0 || r.putLTP > 0);
+        
+        return {
+          id: `${idPrefix}-${symbol}-${Date.now()}`,
+          symbol,
+          expiry: exp.toUpperCase().replace(/ /g, '-'),
+          data: parsedData,
+          atm: currentAtm,
         };
-        const diff = Math.abs(currentAtm - d.strikePrice);
-        if (diff < minDiff) {
-          minDiff = diff;
-          currentAtm = d.strikePrice;
-        }
-        return row;
-      }).filter((r: OptionRow) => r.callLTP > 0 || r.putLTP > 0);
-
-      const tcOI = parsedData.reduce((acc: number, val: OptionRow) => acc + val.callOI, 0);
-      const tpOI = parsedData.reduce((acc: number, val: OptionRow) => acc + val.putOI, 0);
-
-      const newDataset: Dataset = {
-        id: `live-${symbol}-${Date.now()}`,
-        filename: `LIVE NSE API (${symbol})`,
-        symbol,
-        expiry: nearestExpiry.toUpperCase().replace(/ /g, '-'),
-        uploadTime: Date.now(),
-        data: parsedData,
-        atm: currentAtm,
-        totalCallOI: tcOI,
-        totalPutOI: tpOI
       };
 
-      setDatasets(prev => [...prev.filter(d => !d.id.startsWith(`live-${symbol}`)), newDataset]);
-      setActiveDatasetId(newDataset.id);
+      const currDataset = processExpiry(nearestExpiry, 'live-curr');
+      const nextDataset = processExpiry(nextExpiry, 'live-next');
+
+      setDatasets(prev => {
+        const withoutOldLive = prev.filter(d => !d.id.startsWith(`live-${symbol}`));
+        return [...withoutOldLive, currDataset, nextDataset];
+      });
+      setActiveDatasetId(currDataset.id);
+      setCompareDatasetId(nextDataset.id);
+
     } catch (e: any) {
       alert("Failed to fetch Live NSE Data: " + e.message);
     } finally {
@@ -340,7 +298,7 @@ export default function OptionAnalyzer() {
         reader.readAsBinaryString(file);
       }
     });
-    
+
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -348,19 +306,23 @@ export default function OptionAnalyzer() {
 
   // --- Derived Calculations ---
 
-  const { maxCall, maxPut, totalPCR } = useMemo(() => {
-    if (!activeDataset) return { maxCall: null, maxPut: null, totalPCR: 0 };
-    
+  const { maxCall, maxPut, totalPCR, totalCallOI, totalPutOI } = useMemo(() => {
+    if (!activeDataset) return { maxCall: null, maxPut: null, totalPCR: 0, totalCallOI: 0, totalPutOI: 0 };
+
     let mCall = activeDataset.data[0];
     let mPut = activeDataset.data[0];
+    let tcOI = 0;
+    let tpOI = 0;
 
     activeDataset.data.forEach(d => {
       if (d.callOI > mCall.callOI) mCall = d;
       if (d.putOI > mPut.putOI) mPut = d;
+      tcOI += d.callOI;
+      tpOI += d.putOI;
     });
 
-    const pcr = activeDataset.totalCallOI > 0 ? (activeDataset.totalPutOI / activeDataset.totalCallOI) : 0;
-    return { maxCall: mCall, maxPut: mPut, totalPCR: pcr };
+    const pcr = tcOI > 0 ? (tpOI / tcOI) : 0;
+    return { maxCall: mCall, maxPut: mPut, totalPCR: pcr, totalCallOI: tcOI, totalPutOI: tpOI };
   }, [activeDataset]);
 
   const pcrSentiment = useMemo(() => {
@@ -369,67 +331,51 @@ export default function OptionAnalyzer() {
     return { text: "Neutral", color: "#f59e0b" }; // var(--warning)
   }, [totalPCR]);
 
-  const closestMatchPair = useMemo<{ call: OptionRow, put: OptionRow, diffPercent: number } | null>(() => {
-    if (!activeDataset) return null;
-    let bestMatch: { call: OptionRow, put: OptionRow, diffPercent: number } | null = null;
-    let minDiffPercent = Infinity;
-
-    const otmCalls = activeDataset.data.filter(d => d.strike > activeDataset.atm && d.callOI > 5000);
-    const otmPuts = activeDataset.data.filter(d => d.strike < activeDataset.atm && d.putOI > 5000);
-
-    otmCalls.forEach(callData => {
-      otmPuts.forEach(putData => {
-        const diff = Math.abs(callData.callOI - putData.putOI);
-        const maxOI = Math.max(callData.callOI, putData.putOI);
-        const diffPercent = (diff / maxOI) * 100;
-
-        if (diffPercent < minDiffPercent && diffPercent < 15) {
-          minDiffPercent = diffPercent;
-          bestMatch = { call: callData, put: putData, diffPercent };
-        }
-      });
-    });
-    return bestMatch;
-  }, [activeDataset]);
-
-  const filteredOptions = useMemo(() => {
-    if (!activeDataset) return [];
-    let d = activeDataset.data;
-    if (filterMode === "ATM") {
-      d = activeDataset.data.filter(x => Math.abs(x.strike - activeDataset.atm) <= 400);
-    } else if (filterMode === "OTM") {
-      d = activeDataset.data.filter(x => Math.abs(x.strike - activeDataset.atm) > 400);
-    } else if (filterMode === "ITM") {
-      d = activeDataset.data.filter(x => Math.abs(x.strike - activeDataset.atm) > 1000);
-    }
-    return d.map(d => ({ label: formatNum(d.strike), value: d.strike }));
-  }, [activeDataset, filterMode]);
-
-  // Comparison Data Logic
+  // Comparison Data Logic for Rollover
   const comparisonChartData = useMemo(() => {
     if (!activeDataset || !compareDataset) return [];
-    
-    // Merge strikes from both datasets
+
     const strikeSet = new Set([...activeDataset.data.map(d => d.strike), ...compareDataset.data.map(d => d.strike)]);
     const strikes = Array.from(strikeSet).sort((a, b) => a - b);
-    
+
     return strikes.map(strike => {
       const aData = activeDataset.data.find(d => d.strike === strike);
       const cData = compareDataset.data.find(d => d.strike === strike);
-      
+
+      const aCallOI = aData?.callOI || 0;
+      const cCallOI = cData?.callOI || 0;
+      const aPutOI = aData?.putOI || 0;
+      const cPutOI = cData?.putOI || 0;
+
       return {
         strike,
-        activeCall: aData?.callOI || 0,
-        activePut: aData?.putOI || 0,
-        compareCall: cData?.callOI || 0,
-        comparePut: cData?.putOI || 0,
-        callDiff: (aData?.callOI || 0) - (cData?.callOI || 0),
-        putDiff: (aData?.putOI || 0) - (cData?.putOI || 0)
+        activeCall: aCallOI,
+        activePut: aPutOI,
+        compareCall: cCallOI,
+        comparePut: cPutOI,
+        callRollover: (cCallOI / (aCallOI + cCallOI || 1)) * 100,
+        putRollover: (cPutOI / (aPutOI + cPutOI || 1)) * 100,
       };
     }).filter(d => Math.abs(d.strike - activeDataset.atm) <= 800);
   }, [activeDataset, compareDataset]);
 
-  // --- Actions ---
+  const rolloverStats = useMemo(() => {
+    if (!activeDataset || !compareDataset) return null;
+    let aCall = 0, aPut = 0, cCall = 0, cPut = 0;
+    activeDataset.data.forEach(d => { aCall += d.callOI; aPut += d.putOI; });
+    compareDataset.data.forEach(d => { cCall += d.callOI; cPut += d.putOI; });
+
+    const totalCurr = aCall + aPut;
+    const totalNext = cCall + cPut;
+    const rolloverPct = (totalNext / (totalCurr + totalNext || 1)) * 100;
+    
+    return {
+      callRollover: (cCall / (aCall + cCall || 1)) * 100,
+      putRollover: (cPut / (aPut + cPut || 1)) * 100,
+      totalRollover: rolloverPct,
+      sentiment: rolloverPct > 60 ? "Aggressive" : rolloverPct > 40 ? "Steady" : "Weak"
+    }
+  }, [activeDataset, compareDataset]);
 
   const exportPDF = () => {
     const el = document.getElementById("export-container");
@@ -446,31 +392,33 @@ export default function OptionAnalyzer() {
     });
   };
 
-  // --- Render ---
-
   if (datasets.length === 0) {
     return (
       <div className="w-full max-w-4xl mx-auto flex flex-col justify-center items-center h-[80vh]">
-        <div 
-          className="glass-panel hover:border-[#3b82f6] transition-all duration-500 w-full" 
+        <div
+          className="glass-panel hover:border-[#3b82f6] transition-all duration-500 w-full"
           style={{ padding: "6rem 2rem", textAlign: "center", borderStyle: "dashed", cursor: "pointer", borderWidth: "2px" }}
           onClick={() => fileInputRef.current?.click()}
         >
           <div className="bg-[#3b82f6]/10 w-28 h-28 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(59,130,246,0.2)]">
-            <Upload size={56} color="#3b82f6" />
+            <Activity size={56} color="#3b82f6" />
           </div>
-          <h2 className="text-4xl font-bold mb-4 gradient-text tracking-tight">Institutional Data Importer</h2>
+          <h2 className="text-4xl font-bold mb-4 gradient-text tracking-tight">Institutional Terminal</h2>
           <p className="text-[var(--text-secondary)] mb-8 max-w-lg mx-auto text-lg leading-relaxed">
-            Upload NSE Option Chain files to activate the Smart Money Terminal. Supports multiple expiries and historical comparisons.
+            Upload Option Chain files to analyze Rollovers, Calendar Spreads, and Smart Money flows.
           </p>
           <div className="flex justify-center gap-4">
             <button className="btn-primary px-8 py-4 text-lg rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.4)] flex items-center gap-2">
               <Database size={20} /> Select CSV / Excel
             </button>
+            <button 
+              className="bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#10b981] px-8 py-4 text-lg rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center gap-2 border border-[#10b981]/30 transition-colors"
+              onClick={(e) => { e.stopPropagation(); fetchLiveNSEData("NIFTY"); }}
+              disabled={liveLoading}
+            >
+              <CloudLightning size={20} className={liveLoading ? "animate-pulse" : ""} /> {liveLoading ? "Fetching..." : "Fetch Live NSE"}
+            </button>
           </div>
-          <p className="text-xs text-gray-500 mt-6 flex items-center justify-center gap-1">
-            <FileSpreadsheet size={14}/> Auto-detects Symbol & Expiry directly from files
-          </p>
           <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv, .xlsx, .xls" multiple style={{ display: "none" }} />
           {loading && <p className="mt-6 text-[#3b82f6] animate-pulse font-medium">Processing Datasets...</p>}
         </div>
@@ -478,19 +426,13 @@ export default function OptionAnalyzer() {
     );
   }
 
-  // Active Data Helpers
-  const callBaseData = activeDataset?.data.find(d => d.strike === Number(callBase));
-  const callTargetData = activeDataset?.data.find(d => d.strike === Number(callTarget));
-  const putBaseData = activeDataset?.data.find(d => d.strike === Number(putBase));
-  const putTargetData = activeDataset?.data.find(d => d.strike === Number(putTarget));
-
   return (
     <div className="flex flex-col gap-8 w-full max-w-[1600px] mx-auto px-4 pb-20">
-      
-      {/* 1. DATA MANAGER HEADER (Replaces old top actions) */}
+
+      {/* 1. DATA MANAGER HEADER */}
       <div className="bg-[#161925]/90 border border-[var(--border-color)] rounded-2xl p-5 shadow-2xl backdrop-blur-xl sticky top-4 z-[50]">
         <div className="flex flex-col xl:flex-row justify-between items-center gap-6">
-          
+
           {/* Left: Brand & Active Context */}
           <div className="flex items-center gap-6 w-full xl:w-auto">
             <div className="bg-gradient-to-br from-[#3b82f6] to-[#8b5cf6] p-3 rounded-xl shadow-lg">
@@ -504,9 +446,15 @@ export default function OptionAnalyzer() {
                 </span>
               </h1>
               <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)] font-medium">
-                <span className="flex items-center gap-1 text-white"><Layers size={14} color="#3b82f6"/> {activeDataset?.symbol}</span>
+                <span className="flex items-center gap-1 text-white"><Layers size={14} color="#3b82f6" /> {activeDataset?.symbol}</span>
                 <span className="w-1 h-1 rounded-full bg-gray-500"></span>
-                <span className="flex items-center gap-1"><Calendar size={14} color="#8b5cf6"/> {activeDataset?.expiry}</span>
+                <span className="flex items-center gap-1"><Calendar size={14} color="#8b5cf6" /> Current: {activeDataset?.expiry}</span>
+                {compareDataset && (
+                  <>
+                    <span className="w-1 h-1 rounded-full bg-gray-500"></span>
+                    <span className="flex items-center gap-1 text-amber-400"><Clock size={14} /> Next: {compareDataset?.expiry}</span>
+                  </>
+                )}
                 <span className="w-1 h-1 rounded-full bg-gray-500"></span>
                 <span>Spot: <strong className="text-white">{formatNum(activeDataset?.atm || 0)}</strong></span>
               </div>
@@ -515,92 +463,96 @@ export default function OptionAnalyzer() {
 
           {/* Center: File Switching & Management */}
           <div className="flex-1 flex justify-center gap-3 w-full xl:w-auto bg-black/20 p-2 rounded-xl border border-[var(--border-color)]">
-            <div className="w-64">
-              <CustomSelect 
+            <div className="w-48">
+              <CustomSelect
                 icon={Database}
-                options={datasets.map(d => ({ label: `${d.symbol} • ${d.expiry}`, value: d.id }))} 
-                value={activeDatasetId} 
-                onChange={setActiveDatasetId} 
-                placeholder="Switch Dataset..." 
+                options={datasets.map(d => ({ label: `Cur: ${d.expiry}`, value: d.id }))}
+                value={activeDatasetId}
+                onChange={setActiveDatasetId}
+                placeholder="Current Dataset"
               />
             </div>
-            <button 
+            <div className="w-48">
+              <CustomSelect
+                icon={Clock}
+                options={datasets.filter(d=>d.id !== activeDatasetId).map(d => ({ label: `Nxt: ${d.expiry}`, value: d.id }))}
+                value={compareDatasetId}
+                onChange={setCompareDatasetId}
+                placeholder="Next Dataset (Optional)"
+              />
+            </div>
+            <button
               className="bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#10b981] px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 border border-[#10b981]/30"
               onClick={() => fetchLiveNSEData(activeDataset?.symbol || "NIFTY")}
               disabled={liveLoading}
             >
-              <CloudLightning size={16} className={liveLoading ? "animate-pulse" : ""} /> {liveLoading ? "Fetching..." : "Live NSE"}
+              <CloudLightning size={16} className={liveLoading ? "animate-pulse" : ""} />
             </button>
-            <button 
+            <button
               className="bg-[#3b82f6]/20 hover:bg-[#3b82f6]/30 text-[#3b82f6] px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 border border-[#3b82f6]/30"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload size={16} /> Import CSV
+              <Upload size={16} />
             </button>
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv, .xlsx, .xls" multiple style={{ display: "none" }} />
           </div>
 
           {/* Right: Actions */}
           <div className="flex gap-3 w-full xl:w-auto justify-end">
-            <button className="bg-[#1a1d2d] hover:bg-[#252a40] text-white px-4 py-2 rounded-lg border border-[var(--border-color)] transition-all flex items-center gap-2 shadow-md">
-              <Camera size={16} /> <span className="hidden sm:inline">Screenshot</span>
-            </button>
             <button className="bg-[#1a1d2d] hover:bg-[#252a40] text-white px-4 py-2 rounded-lg border border-[var(--border-color)] transition-all flex items-center gap-2 shadow-md" onClick={exportPDF}>
               <Download size={16} /> <span className="hidden sm:inline">Export PDF</span>
-            </button>
-            <button className="bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] px-4 py-2 rounded-lg border border-[#ef4444]/30 transition-all flex items-center gap-2" onClick={() => setDatasets([])}>
-              <RefreshCw size={16} /> <span className="hidden sm:inline">Reset All</span>
             </button>
           </div>
         </div>
       </div>
 
       <div id="export-container" className="flex flex-col gap-8">
-        
+
         {/* 2. TABS NAVIGATION */}
         <div className="flex gap-2 p-1 bg-[#161925]/50 border border-[var(--border-color)] rounded-xl w-fit mx-auto lg:mx-0 backdrop-blur-sm overflow-x-auto max-w-full">
-          {["Overview", "CustomLab", "Ratios", "SmartMoney", "Historical"].map((tab) => (
+          {[
+            { id: "Overview", label: "Overview & Bias" },
+            { id: "StrategyEngine", label: "Strategy Engine" },
+            { id: "SmartMoney", label: "Smart Money & PCR" },
+            { id: "Rollover", label: "Rollover Analysis" },
+            { id: "CustomLab", label: "Custom Strategy Lab" }
+          ].map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab as "Overview" | "Ratios" | "SmartMoney" | "Historical" | "CustomLab")}
-              className={`px-6 py-3 rounded-lg font-bold text-sm transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-gradient-to-r from-[#3b82f6] to-[#8b5cf6] text-white shadow-lg' : 'text-[var(--text-secondary)] hover:text-white hover:bg-white/5'}`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-6 py-3 rounded-lg font-bold text-sm transition-all duration-300 whitespace-nowrap ${activeTab === tab.id ? 'bg-gradient-to-r from-[#3b82f6] to-[#8b5cf6] text-white shadow-lg' : 'text-[var(--text-secondary)] hover:text-white hover:bg-white/5'}`}
             >
-              {tab === "CustomLab" ? "Custom Strategy Lab" : tab === "Ratios" ? "Ratio Spread Builder" : tab === "SmartMoney" ? "AI & Heatmap" : tab === "Historical" ? "Compare Expiries" : tab}
+              {tab.label}
             </button>
           ))}
         </div>
 
         {/* 3. TAB VIEWS */}
 
-        {/* ================= CUSTOM LAB TAB ================= */}
-        {activeTab === "CustomLab" && (
-          <CustomStrategyBuilder activeDataset={activeDataset} />
-        )}
-        
         {/* ================= OVERVIEW TAB ================= */}
         {activeTab === "Overview" && (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500">
             {/* Status Panel */}
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-5 bg-[#161925]/40 rounded-2xl border border-[var(--border-color)]">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 p-5 bg-[#161925]/40 rounded-2xl border border-[var(--border-color)]">
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-1">Total CE OI</p>
-                <p className="font-bold text-lg text-[#ef4444]">{formatNum(activeDataset?.totalCallOI || 0)}</p>
+                <p className="font-bold text-lg text-[#ef4444]">{formatNum(totalCallOI)}</p>
               </div>
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-1">Total PE OI</p>
-                <p className="font-bold text-lg text-[#10b981]">{formatNum(activeDataset?.totalPutOI || 0)}</p>
+                <p className="font-bold text-lg text-[#10b981]">{formatNum(totalPutOI)}</p>
               </div>
               <div>
-                <p className="text-xs text-[var(--text-secondary)] mb-1">PCR Ratio</p>
-                <p className="font-bold text-lg" style={{ color: pcrSentiment.color }}>{totalPCR.toFixed(2)} ({pcrSentiment.text})</p>
+                <p className="text-xs text-[var(--text-secondary)] mb-1">Total PCR Ratio</p>
+                <p className="font-bold text-lg" style={{ color: pcrSentiment.color }}>{totalPCR.toFixed(3)}</p>
               </div>
               <div>
-                <p className="text-xs text-[var(--text-secondary)] mb-1">Total Strikes</p>
+                <p className="text-xs text-[var(--text-secondary)] mb-1">Total Strikes Parsed</p>
                 <p className="font-bold text-lg text-white">{activeDataset?.data.length}</p>
               </div>
-              <div className="col-span-2">
-                <p className="text-xs text-[var(--text-secondary)] mb-1">Source File</p>
-                <p className="font-bold text-sm text-gray-300 truncate bg-black/30 p-1.5 rounded">{activeDataset?.filename}</p>
+              <div>
+                <p className="text-xs text-[var(--text-secondary)] mb-1">Rollover Bias</p>
+                <p className={`font-bold text-lg ${rolloverStats?.sentiment === 'Aggressive' ? 'text-amber-400' : 'text-gray-300'}`}>{rolloverStats ? rolloverStats.sentiment : 'N/A'}</p>
               </div>
             </div>
 
@@ -618,7 +570,7 @@ export default function OptionAnalyzer() {
                   Highest Resistance <TrendingUp size={16} color="#ef4444" />
                 </p>
                 <h2 className="text-5xl font-extrabold text-[#ef4444] mb-2">{formatNum(maxCall?.strike || 0)}</h2>
-                <div className="text-sm text-gray-300 font-semibold bg-black/30 w-fit px-3 py-1 rounded-full">{formatNum(maxCall?.callOI || 0)} CE</div>
+                <div className="text-sm text-gray-300 font-semibold bg-black/30 w-fit px-3 py-1 rounded-full">{formatNum(maxCall?.callOI || 0)} CE OI</div>
               </div>
 
               <div className="glass-panel p-8 border-b-4 border-b-[#10b981] relative overflow-hidden shadow-xl">
@@ -626,7 +578,7 @@ export default function OptionAnalyzer() {
                   Highest Support <TrendingDown size={16} color="#10b981" />
                 </p>
                 <h2 className="text-5xl font-extrabold text-[#10b981] mb-2">{formatNum(maxPut?.strike || 0)}</h2>
-                <div className="text-sm text-gray-300 font-semibold bg-black/30 w-fit px-3 py-1 rounded-full">{formatNum(maxPut?.putOI || 0)} PE</div>
+                <div className="text-sm text-gray-300 font-semibold bg-black/30 w-fit px-3 py-1 rounded-full">{formatNum(maxPut?.putOI || 0)} PE OI</div>
               </div>
 
               <div className="glass-panel p-8 relative overflow-hidden shadow-xl" style={{ borderBottom: `4px solid ${pcrSentiment.color}` }}>
@@ -643,15 +595,15 @@ export default function OptionAnalyzer() {
             {/* Quick Chart */}
             <div className="glass-panel p-8 shadow-xl">
               <h3 className="text-2xl font-bold mb-8 flex items-center gap-3">
-                <BarChart2 className="text-[#3b82f6]" size={28} /> OI Profile (Quick View)
+                <BarChart2 className="text-[#3b82f6]" size={28} /> Strike Visualization
               </h3>
               <div className="h-[400px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={activeDataset?.data.filter(d => Math.abs(d.strike - (activeDataset?.atm || 0)) <= 800)} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                     <XAxis dataKey="strike" stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} />
-                    <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} tickFormatter={(val) => `${(val/100000).toFixed(1)}L`} />
-                    <RechartsTooltip 
+                    <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} tickFormatter={(val) => `${(val / 100000).toFixed(1)}L`} />
+                    <RechartsTooltip
                       contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', padding: '15px' }}
                       itemStyle={{ color: '#fff', fontWeight: 'bold' }}
                       formatter={(value: any) => [formatNum(value), ""]}
@@ -666,162 +618,138 @@ export default function OptionAnalyzer() {
           </div>
         )}
 
-        {/* ================= RATIOS TAB ================= */}
-        {activeTab === "Ratios" && (
-          <StrategyEngine activeDataset={activeDataset} />
+        {/* ================= STRATEGY ENGINE TAB ================= */}
+        {activeTab === "StrategyEngine" && (
+          <StrategyEngine activeDataset={activeDataset} compareDataset={compareDataset} />
         )}
 
-        {/* ================= SMART MONEY & HEATMAP TAB ================= */}
+        {/* ================= CUSTOM LAB TAB ================= */}
+        {activeTab === "CustomLab" && (
+          <CustomStrategyBuilder activeDataset={activeDataset} />
+        )}
+
+        {/* ================= SMART MONEY & PCR TAB ================= */}
         {activeTab === "SmartMoney" && (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* AI Insights */}
-              <div className="flex-1 bg-gradient-to-b from-[#1a1d2d] to-[#0f111a] rounded-2xl border border-[#8b5cf6]/40 p-8 relative overflow-hidden shadow-2xl lg:col-span-2">
+              <div className="bg-gradient-to-b from-[#1a1d2d] to-[#0f111a] rounded-2xl border border-[#8b5cf6]/40 p-8 relative overflow-hidden shadow-2xl">
                 <div className="absolute top-[-30px] right-[-30px] opacity-10"><BrainCircuit size={150} color="#8b5cf6" /></div>
                 <h3 className="text-2xl font-bold mb-6 flex items-center gap-3 text-[#8b5cf6]">
-                  <Lightbulb size={28} /> Advanced AI Interpretation
+                  <Lightbulb size={28} /> AI PCR & Heatmap Engine
                 </h3>
                 <div className="space-y-4 relative z-10 bg-black/20 p-6 rounded-xl border border-white/5">
                   <div className="flex gap-4 text-base text-gray-200 items-start">
-                    <span className="text-[#8b5cf6] mt-1"><Layers size={18}/></span>
-                    <span className="leading-relaxed"><strong className="text-white">Resistance:</strong> Heavy Call Writing detected at <strong className="text-[#ef4444]">{formatNum(maxCall?.strike || 0)}</strong>. Market will struggle to cross this zone.</span>
+                    <span className="text-[#8b5cf6] mt-1"><Layers size={18} /></span>
+                    <span className="leading-relaxed"><strong className="text-white">Resistance Zone:</strong> Massive Call Writing at <strong className="text-[#ef4444]">{formatNum(maxCall?.strike || 0)}</strong>. Institutions expect expiry below this level.</span>
                   </div>
                   <div className="flex gap-4 text-base text-gray-200 items-start">
-                    <span className="text-[#8b5cf6] mt-1"><Layers size={18}/></span>
-                    <span className="leading-relaxed"><strong className="text-white">Support:</strong> Put support is exceptionally strong at <strong className="text-[#10b981]">{formatNum(maxPut?.strike || 0)}</strong>. Market makers defending this floor.</span>
+                    <span className="text-[#8b5cf6] mt-1"><Layers size={18} /></span>
+                    <span className="leading-relaxed"><strong className="text-white">Support Zone:</strong> Deep Put Writing at <strong className="text-[#10b981]">{formatNum(maxPut?.strike || 0)}</strong>. Market Makers defending the floor aggressively.</span>
                   </div>
                   <div className="flex gap-4 text-base text-gray-200 items-start">
-                    <span className="text-[#8b5cf6] mt-1"><Layers size={18}/></span>
+                    <span className="text-[#8b5cf6] mt-1"><Layers size={18} /></span>
                     <span className="leading-relaxed">
-                      <strong className="text-white">Sentiment:</strong> PCR is <strong style={{ color: pcrSentiment.color }}>{totalPCR.toFixed(2)}</strong>. {totalPCR > 1.2 ? "Aggressive put selling signals a bullish structure." : totalPCR < 0.8 ? "Heavy call writing dictates a bearish ceiling." : "Range-bound trading expected."}
+                      <strong className="text-white">Market Bias:</strong> PCR at <strong style={{ color: pcrSentiment.color }}>{totalPCR.toFixed(3)}</strong>. {totalPCR > 1.2 ? "Extremely bullish sentiment with aggressive put shorting." : totalPCR < 0.8 ? "Bearish sentiment with strong call resistance." : "Sideways and range-bound trading anticipated."}
                     </span>
                   </div>
-                  {closestMatchPair && (
-                    <div className="flex gap-4 text-base text-gray-200 items-start mt-4 p-4 bg-yellow-400/10 border border-yellow-400/30 rounded-lg">
-                      <span className="text-yellow-400 mt-1"><Crosshair size={18}/></span>
-                      <span className="leading-relaxed">
-                        <strong className="text-yellow-400">Institutional Strangle Detected:</strong> High probability of market settling between <strong className="text-white">{formatNum(closestMatchPair.put.strike)}</strong> and <strong className="text-white">{formatNum(closestMatchPair.call.strike)}</strong> due to mirrored OI writing activity.
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Strangle Matcher */}
-              <div className="glass-panel p-8 flex flex-col gap-6 lg:col-span-1 shadow-xl">
-                <h3 className="text-xl font-bold flex items-center gap-2 text-yellow-400">
-                  <Search size={24} /> Closest OI Match
+              {/* Volatility Engine */}
+              <div className="glass-panel p-8 relative overflow-hidden shadow-2xl">
+                 <h3 className="text-2xl font-bold mb-6 flex items-center gap-3 text-amber-400">
+                  <Activity size={28} /> Volatility Skew & Smile
                 </h3>
-                {closestMatchPair ? (
-                  <div className="bg-[#161925] border border-[var(--border-color)] p-6 rounded-2xl flex-1 flex flex-col justify-center shadow-inner">
-                    <div className="flex justify-between items-center mb-6">
-                      <div className="text-center">
-                        <div className="text-[#ef4444] font-bold text-3xl mb-1">{formatNum(closestMatchPair.call.strike)}</div>
-                        <div className="text-xs text-gray-400 font-bold bg-black/30 py-1 px-2 rounded">CE OI: {formatNum(closestMatchPair.call.callOI)}</div>
-                      </div>
-                      <div className="text-yellow-500 font-black text-lg bg-yellow-500/10 px-3 py-1 rounded-full">VS</div>
-                      <div className="text-center">
-                        <div className="text-[#10b981] font-bold text-3xl mb-1">{formatNum(closestMatchPair.put.strike)}</div>
-                        <div className="text-xs text-gray-400 font-bold bg-black/30 py-1 px-2 rounded">PE OI: {formatNum(closestMatchPair.put.putOI)}</div>
-                      </div>
-                    </div>
-                    <div className="text-sm text-yellow-100 text-center border-t border-white/5 pt-4">
-                      Difference: <strong className="text-white text-lg">{closestMatchPair.diffPercent.toFixed(1)}%</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-400 italic bg-black/20 p-8 rounded-xl text-center border border-dashed border-white/10 flex-1 flex items-center justify-center">
-                    No tightly matching bounds detected for current expiry.
-                  </div>
-                )}
+                <p className="text-sm text-gray-400 mb-4">Implied Volatility (IV) curve across strikes reveals hedging demand.</p>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={activeDataset?.data.filter(d => Math.abs(d.strike - (activeDataset?.atm || 0)) <= 800)}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="strike" stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} domain={['auto','auto']} />
+                      <RechartsTooltip contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)' }} />
+                      <Legend />
+                      <Line type="monotone" dataKey="callIV" stroke="#ef4444" strokeWidth={2} dot={false} name="Call IV %" />
+                      <Line type="monotone" dataKey="putIV" stroke="#10b981" strokeWidth={2} dot={false} name="Put IV %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ================= HISTORICAL / COMPARE TAB ================= */}
-        {activeTab === "Historical" && (
+        {/* ================= ROLLOVER & COMPARE TAB ================= */}
+        {activeTab === "Rollover" && (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500">
             <div className="glass-panel p-8">
-              <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-6">
+              <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-6 border-b border-white/5 pb-6">
                 <div>
                   <h3 className="text-2xl font-bold flex items-center gap-3 text-white">
-                    <Clock size={28} color="#3b82f6" /> Compare Expiries / Historical
+                    <Clock size={28} color="#f59e0b" /> Rollover Migration Analysis
                   </h3>
-                  <p className="text-[var(--text-secondary)] mt-2">Compare OI shifts between two loaded datasets to track rollover or money migration.</p>
+                  <p className="text-[var(--text-secondary)] mt-2">Track Smart Money shifting from Current to Next Expiry.</p>
                 </div>
-                
-                <div className="bg-[#161925]/80 p-3 rounded-xl border border-[var(--border-color)] flex items-center gap-4 w-full md:w-[400px]">
-                  <span className="text-sm font-bold text-gray-400 whitespace-nowrap px-2">Compare with:</span>
-                  <CustomSelect 
-                    options={datasets.filter(d => d.id !== activeDatasetId).map(d => ({ label: `${d.symbol} • ${d.expiry}`, value: d.id }))} 
-                    value={compareDatasetId} 
-                    onChange={setCompareDatasetId} 
-                    placeholder="Select Dataset" 
-                  />
-                </div>
+
+                {!compareDataset && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 text-amber-500 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+                    <ShieldAlert size={18} /> Select "Next Dataset" in top bar to view Rollover.
+                  </div>
+                )}
               </div>
 
-              {!compareDatasetId ? (
-                <div className="bg-[#161925] border border-dashed border-white/10 rounded-2xl p-16 text-center">
-                  <Database size={48} className="mx-auto mb-4 text-gray-600" />
-                  <h4 className="text-xl font-bold text-gray-300 mb-2">No Comparison Dataset Selected</h4>
-                  <p className="text-gray-500 max-w-md mx-auto">Upload another CSV and select it from the dropdown above to view OI migration charts.</p>
-                  <button 
-                    className="mt-6 bg-[#3b82f6]/20 hover:bg-[#3b82f6]/30 text-[#3b82f6] px-6 py-3 rounded-xl font-bold transition-all border border-[#3b82f6]/30 inline-flex items-center gap-2"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={18} /> Upload More Data
-                  </button>
-                </div>
-              ) : (
+              {compareDataset ? (
                 <div className="flex flex-col gap-8">
                   {/* Diff Stats */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div className="bg-[#161925] p-6 rounded-xl border border-[var(--border-color)]">
-                      <p className="text-sm text-gray-400 mb-2">Comparing</p>
-                      <p className="font-bold text-lg text-[#3b82f6]">{activeDataset?.expiry}</p>
-                      <p className="text-sm font-bold text-gray-500 my-1">vs</p>
-                      <p className="font-bold text-lg text-[#8b5cf6]">{compareDataset?.expiry}</p>
+                      <p className="text-sm text-gray-400 mb-1">Total Rollover %</p>
+                      <p className="font-bold text-3xl text-amber-400">{rolloverStats?.totalRollover.toFixed(2)}%</p>
+                      <p className="text-xs text-gray-500 mt-2">Puts + Calls Shifted</p>
                     </div>
                     <div className="bg-[#161925] p-6 rounded-xl border border-[var(--border-color)]">
-                      <p className="text-sm text-gray-400 mb-2">Total Call OI Shift</p>
-                      <p className={`font-bold text-2xl ${(activeDataset?.totalCallOI || 0) > (compareDataset?.totalCallOI || 0) ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
-                        {formatNum((activeDataset?.totalCallOI || 0) - (compareDataset?.totalCallOI || 0))}
-                      </p>
+                      <p className="text-sm text-gray-400 mb-1">Call Rollover %</p>
+                      <p className="font-bold text-3xl text-[#ef4444]">{rolloverStats?.callRollover.toFixed(2)}%</p>
+                      <p className="text-xs text-gray-500 mt-2">Resistance Migration</p>
                     </div>
                     <div className="bg-[#161925] p-6 rounded-xl border border-[var(--border-color)]">
-                      <p className="text-sm text-gray-400 mb-2">Total Put OI Shift</p>
-                      <p className={`font-bold text-2xl ${(activeDataset?.totalPutOI || 0) > (compareDataset?.totalPutOI || 0) ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
-                        {formatNum((activeDataset?.totalPutOI || 0) - (compareDataset?.totalPutOI || 0))}
-                      </p>
+                      <p className="text-sm text-gray-400 mb-1">Put Rollover %</p>
+                      <p className="font-bold text-3xl text-[#10b981]">{rolloverStats?.putRollover.toFixed(2)}%</p>
+                      <p className="text-xs text-gray-500 mt-2">Support Migration</p>
+                    </div>
+                    <div className="bg-[#161925] p-6 rounded-xl border border-[var(--border-color)]">
+                      <p className="text-sm text-gray-400 mb-1">Conviction Engine</p>
+                      <p className={`font-bold text-3xl ${rolloverStats?.sentiment === 'Aggressive' ? 'text-emerald-400' : 'text-gray-400'}`}>{rolloverStats?.sentiment}</p>
+                      <p className="text-xs text-gray-500 mt-2">Institutional Participation</p>
                     </div>
                   </div>
 
-                  {/* Diff Chart */}
-                  <div className="h-[500px] w-full bg-black/20 p-6 rounded-2xl border border-white/5">
-                    <h4 className="text-lg font-bold mb-6 flex items-center gap-2"><BarChart2 className="text-[#3b82f6]"/> Shift Analysis (Blue = Active, Purple = Compare)</h4>
+                  {/* Chart */}
+                  <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Strike-wise Rollover Heatmap</h4>
+                  <div className="h-[450px] w-full bg-[#0a0c12] rounded-xl p-4 border border-[var(--border-color)]">
                     <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={comparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                         <XAxis dataKey="strike" stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} />
-                        <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} tickFormatter={(val) => `${(val/100000).toFixed(1)}L`} />
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff' }}
-                          itemStyle={{ color: '#fff' }}
+                        <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} tickFormatter={(val) => `${(val / 100000).toFixed(1)}L`} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: 'rgba(15, 17, 26, 0.95)', borderColor: 'rgba(255,255,255,0.1)' }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        <Legend />
+                        <Bar dataKey="activePut" fill="#10b981" opacity={0.3} name="Curr Put OI" stackId="put" />
+                        <Bar dataKey="comparePut" fill="#10b981" name="Next Put OI" stackId="put" />
                         
-                        {/* Call Compare */}
-                        <Line type="monotone" dataKey="activeCall" name={`${activeDataset?.expiry} Call`} stroke="#3b82f6" strokeWidth={3} dot={false} />
-                        <Line type="monotone" dataKey="compareCall" name={`${compareDataset?.expiry} Call`} stroke="#8b5cf6" strokeWidth={3} strokeDasharray="5 5" dot={false} />
-                        
-                        {/* Put Compare */}
-                        <Line type="monotone" dataKey="activePut" name={`${activeDataset?.expiry} Put`} stroke="#10b981" strokeWidth={3} dot={false} />
-                        <Line type="monotone" dataKey="comparePut" name={`${compareDataset?.expiry} Put`} stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={false} />
+                        <Bar dataKey="activeCall" fill="#ef4444" opacity={0.3} name="Curr Call OI" stackId="call" />
+                        <Bar dataKey="compareCall" fill="#ef4444" name="Next Call OI" stackId="call" />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
+                </div>
+              ) : (
+                <div className="text-center py-20 text-gray-500">
+                  <Database size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>Awaiting Next Expiry Dataset...</p>
                 </div>
               )}
             </div>

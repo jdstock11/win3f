@@ -51,14 +51,20 @@ interface RolloverDayData {
   oiChangePct: number;
   volChangePct: number;
   
-  // Scoring
+  // Scoring & Phases
   TrendStrength: number;
+  momentumScore: number;
   strengthCategory: "Weak" | "Moderate" | "Strong" | "Aggressive";
   Prediction: string;
   expiryPhase: string;
-  IsShiftDate: boolean;
+  
+  // Traps & Spikes
+  trapAlert: "Long Trap" | "Short Trap" | "Fake Breakout" | "Fake Breakdown" | "None";
+  spikeAlert: string;
+  volumeSpike: boolean;
   
   // Reference
+  IsShiftDate: boolean;
   DateObj: Date; 
 }
 
@@ -173,8 +179,8 @@ export default function RolloverAnalyzer() {
   }, [currentData, nextData, symbolFilter, volThreshold, oiThreshold]);
 
   const runRolloverAnalysis = () => {
-    const cData = currentData.filter(d => d.symbol.toUpperCase().includes(symbolFilter.toUpperCase()));
-    const nData = nextData.filter(d => d.symbol.toUpperCase().includes(symbolFilter.toUpperCase()));
+    let cData = currentData.filter(d => d.symbol.toUpperCase().includes(symbolFilter.toUpperCase()));
+    let nData = nextData.filter(d => d.symbol.toUpperCase().includes(symbolFilter.toUpperCase()));
 
     const formatDate = (rawDate: string) => {
       const cleanTs = rawDate.trim();
@@ -187,6 +193,9 @@ export default function RolloverAnalyzer() {
       }
       return isNaN(d.getTime()) ? cleanTs : d.toISOString().split("T")[0];
     };
+
+    cData.sort((a, b) => new Date(formatDate(a.date)).getTime() - new Date(formatDate(b.date)).getTime());
+    nData.sort((a, b) => new Date(formatDate(a.date)).getTime() - new Date(formatDate(b.date)).getTime());
 
     const cMap = new Map();
     cData.forEach(c => {
@@ -212,14 +221,21 @@ export default function RolloverAnalyzer() {
       }
 
       // Delta Calculations
-      const priceChangePct = prevNext && prevNext.close ? ((next.close - prevNext.close) / prevNext.close) * 100 : 0;
-      const oiChangePct = prevNext && prevNext.oi ? ((next.oi - prevNext.oi) / prevNext.oi) * 100 : 0;
-      const volChangePct = prevNext && prevNext.volume ? ((next.volume - prevNext.volume) / prevNext.volume) * 100 : 0;
+      let priceChangePct = 0;
+      let oiChangePct = 0;
+      let volChangePct = 0;
 
-      const priceUp = prevNext ? next.close > prevNext.close : next.close > next.open;
-      const priceDown = prevNext ? next.close < prevNext.close : next.close < next.open;
-      const oiUp = prevNext ? next.oi > prevNext.oi : next.oi > 0;
-      const oiDown = prevNext ? next.oi < prevNext.oi : next.oi < 0;
+      if (prevNext && prevNext.close !== 0 && prevNext.oi !== 0 && prevNext.volume !== 0) {
+        priceChangePct = ((next.close - prevNext.close) / prevNext.close) * 100;
+        oiChangePct = ((next.oi - prevNext.oi) / prevNext.oi) * 100;
+        volChangePct = ((next.volume - prevNext.volume) / prevNext.volume) * 100;
+        console.log(`[Debug Delta] Date: ${next.date} | Prev Close: ${prevNext.close} | Cur Close: ${next.close} | Price Δ: ${priceChangePct.toFixed(2)}% | OI Δ: ${oiChangePct.toFixed(2)}%`);
+      }
+
+      const priceUp = priceChangePct > 0;
+      const priceDown = priceChangePct < 0;
+      const oiUp = oiChangePct > 0;
+      const oiDown = oiChangePct < 0;
 
       // 1. OI + Price Matrix Engine
       let buildup: RolloverDayData["buildup"] = "Neutral";
@@ -262,6 +278,27 @@ export default function RolloverAnalyzer() {
       
       trendScore = Math.max(0, Math.min(100, trendScore));
 
+      // Momentum Score
+      const momentumScore = Math.min(100, Math.abs(priceChangePct * 10) + Math.abs(volChangePct / 2));
+
+      // Spike Engine
+      const volumeSpike = volChangePct > 50;
+      const oiSpike = oiChangePct > 15;
+      let spikeAlert = "Normal";
+      if (volumeSpike && oiSpike && buildup.includes("Build-up")) spikeAlert = "Institutional Activity Spike";
+      else if (volumeSpike && rollover) spikeAlert = "Aggressive Rollover";
+      else if (volumeSpike && buildup === "Short Covering") spikeAlert = "Sudden Short Covering";
+      else if (volumeSpike && buildup === "Long Unwinding") spikeAlert = "Panic Unwinding";
+
+      // Trap Detection Engine
+      let trapAlert: RolloverDayData["trapAlert"] = "None";
+      if (prevNext) {
+         if (next.close > prevNext.high && (oiChangePct < 0 || volChangePct < 0)) trapAlert = "Fake Breakout";
+         else if (next.close < prevNext.low && (oiChangePct < 0 || volChangePct < 0)) trapAlert = "Fake Breakdown";
+         else if (priceDown && prevNext.close > prevNext.open && next.close < prevNext.low) trapAlert = "Long Trap";
+         else if (priceUp && prevNext.close < prevNext.open && next.close > prevNext.high) trapAlert = "Short Trap";
+      }
+
       let strengthCategory: RolloverDayData["strengthCategory"] = "Weak";
       if (trendScore >= 75) strengthCategory = "Aggressive";
       else if (trendScore >= 50) strengthCategory = "Strong";
@@ -269,9 +306,10 @@ export default function RolloverAnalyzer() {
 
       // Phase Classification
       let phase = "Early Rollover";
-      if (volMigrationPct > 80) phase = "Final Settlement";
-      else if (volMigrationPct > 60) phase = "Aggressive Rollover";
-      else if (volMigrationPct > 40) phase = "Mid Rollover";
+      if (volMigrationPct > 80) phase = "Expiry Settlement";
+      else if (volMigrationPct > 65) phase = "Final Migration Phase";
+      else if (volMigrationPct > 50) phase = "Aggressive Rollover";
+      else if (volMigrationPct > 30) phase = "Active Rollover";
 
       if (next.volume < volThreshold || next.oi < oiThreshold) return null;
 
@@ -308,9 +346,13 @@ export default function RolloverAnalyzer() {
         VolumeDiffPct: curr.volume ? ((next.volume - curr.volume) / curr.volume) * 100 : 0,
         OIDiffPct: prevNext && prevNext.oi ? ((next.oi - prevNext.oi) / prevNext.oi) * 100 : 0,
         TrendStrength: trendScore,
+        momentumScore,
         strengthCategory,
         Prediction: prediction,
         expiryPhase: phase,
+        trapAlert,
+        volumeSpike,
+        spikeAlert,
         IsShiftDate: isShiftDate
       };
     }).filter(Boolean) as RolloverDayData[];
@@ -321,6 +363,8 @@ export default function RolloverAnalyzer() {
 
   const latestData = analysisData.length > 0 ? analysisData[analysisData.length - 1] : null;
   const shiftDates = analysisData.filter(a => a.IsShiftDate);
+  const highestOIZone = analysisData.length > 0 ? analysisData.reduce((prev, curr) => (curr.nextOI > prev.nextOI ? curr : prev), analysisData[0]) : null;
+  const highestVolZone = analysisData.length > 0 ? analysisData.reduce((prev, curr) => (curr.nextVolume > prev.nextVolume ? curr : prev), analysisData[0]) : null;
 
   // Insights Logic
   const insights = useMemo(() => {
@@ -338,6 +382,16 @@ export default function RolloverAnalyzer() {
       messages.push("Liquidation Phase: Long positions are exiting.");
     }
 
+    // Spike Engine
+    if (recent.spikeAlert !== "Normal") {
+      messages.push(`Volume Spike: ${recent.spikeAlert}`);
+    }
+
+    // Trap Detection
+    if (recent.trapAlert !== "None") {
+      messages.push(`Trap Alert: ${recent.trapAlert} Detected!`);
+    }
+
     if (recent.RolloverPct > 70) {
       messages.push("High conviction rollover: Majority positions shifted.");
     } else if (recent.RolloverPct < 30) {
@@ -345,9 +399,9 @@ export default function RolloverAnalyzer() {
     }
 
     if (shiftDates.length > 0) {
-      messages.push(`Expiry Pressure Zone from Shift Date (${shiftDates[0].date}). Pivot: ${shiftDates[0].close}`);
-      messages.push(`Strong Support Created: ${shiftDates[0].low}`);
-      messages.push(`Strong Resistance Created: ${shiftDates[0].high}`);
+      messages.push(`Shift Date Zone (${shiftDates[0].date}). Pivot: ${shiftDates[0].close}`);
+      messages.push(`Institutional Resistance Established: ${shiftDates[0].high}`);
+      messages.push(`Institutional Support Established: ${shiftDates[0].low}`);
     }
 
     return messages;
@@ -391,6 +445,8 @@ export default function RolloverAnalyzer() {
         <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl text-sm font-medium">
           <p className="text-white font-bold mb-2 pb-2 border-b border-slate-700">{label}</p>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <p className="text-slate-400">Cur Close:</p>
+            <p className="text-slate-200 text-right">{data.currentClose.toLocaleString()}</p>
             <p className="text-slate-400">Next Close:</p>
             <p className="text-indigo-400 text-right">{data.nextClose.toLocaleString()}</p>
             <p className="text-slate-400">Next Vol:</p>
@@ -547,14 +603,14 @@ export default function RolloverAnalyzer() {
                 <div className="mt-3 flex gap-4 text-xs">
                   <div className="flex flex-col">
                     <span className="text-slate-500">Price Δ</span>
-                    <span className={latestData?.priceChangePct && latestData.priceChangePct > 0 ? "text-emerald-400" : "text-rose-400"}>
-                      {latestData?.priceChangePct > 0 ? "+" : ""}{latestData?.priceChangePct.toFixed(2)}%
+                    <span className={(latestData?.priceChangePct || 0) > 0 ? "text-emerald-400" : "text-rose-400"}>
+                      {(latestData?.priceChangePct || 0) > 0 ? "+" : ""}{(latestData?.priceChangePct || 0).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-slate-500">OI Δ</span>
-                    <span className={latestData?.oiChangePct && latestData.oiChangePct > 0 ? "text-emerald-400" : "text-rose-400"}>
-                      {latestData?.oiChangePct > 0 ? "+" : ""}{latestData?.oiChangePct.toFixed(2)}%
+                    <span className={(latestData?.oiChangePct || 0) > 0 ? "text-emerald-400" : "text-rose-400"}>
+                      {(latestData?.oiChangePct || 0) > 0 ? "+" : ""}{(latestData?.oiChangePct || 0).toFixed(2)}%
                     </span>
                   </div>
                 </div>
@@ -691,6 +747,13 @@ export default function RolloverAnalyzer() {
                         <ReferenceLine yAxisId="price" y={shiftDates[0].low} stroke="#10b981" strokeDasharray="4 4" strokeWidth={2} label={{ position: 'insideBottomLeft', value: 'Inst. Support', fill: '#10b981', fontSize: 11 }} />
                         <ReferenceLine yAxisId="price" x={shiftDates[0].date} stroke="#8b5cf6" strokeWidth={2} label={{ position: 'top', value: 'Shift Date', fill: '#8b5cf6', fontSize: 11 }} />
                       </>
+                    )}
+                    
+                    {highestOIZone && (
+                       <ReferenceLine yAxisId="price" y={highestOIZone.close} stroke="#f59e0b" strokeDasharray="3 3" label={{ position: 'insideTopRight', value: 'Highest OI Build-up Zone', fill: '#f59e0b', fontSize: 10 }} />
+                    )}
+                    {highestVolZone && highestVolZone.close !== highestOIZone?.close && (
+                       <ReferenceLine yAxisId="price" y={highestVolZone.close} stroke="#3b82f6" strokeDasharray="3 3" label={{ position: 'insideBottomRight', value: 'Highest Vol Migration Zone', fill: '#3b82f6', fontSize: 10 }} />
                     )}
 
                     <Bar yAxisId="volume" dataKey="currentVolume" fill="#334155" opacity={0.6} name="Current Vol" radius={[4, 4, 0, 0]} />
