@@ -151,11 +151,7 @@ export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreE
   let rr = "1:1";
   let confidence = 65;
   let reasons = ["PCR is relatively neutral.", "Lack of decisive Smart Money skew.", "Market trading near center of Max Pain range."];
-  let avoidTradeZone = {
-    lowerBound: underlyingValue * 0.99,
-    upperBound: underlyingValue * 1.01,
-    reason: "Whipsaw zone due to heavy gamma pinning at ATM."
-  };
+  // avoidTradeZone will be calculated dynamically
   
   let instConclusion = {
     marketBias: "Range-Bound / Neutral",
@@ -180,11 +176,7 @@ export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreE
     rr = "1:2.5";
     confidence = score.pcr.confidence * 0.5 + 40;
     reasons = ["PCR indicates oversold or bullish build-up.", "Smart Money Call buying / Put writing detected.", "Price holding strongly above major OI Support."];
-    avoidTradeZone = {
-      lowerBound: underlyingValue,
-      upperBound: resistance !== Infinity ? resistance : underlyingValue * 1.02,
-      reason: "Avoid buying near resistance; risk/reward is skewed unfavorably."
-    };
+    // avoidTradeZone removed from here
     instConclusion = {
       marketBias: "Bullish",
       confidence: confidence,
@@ -207,11 +199,7 @@ export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreE
     rr = "1:2.5";
     confidence = score.pcr.confidence * 0.5 + 40;
     reasons = ["PCR indicates overbought or bearish build-up.", "Smart Money Call writing / Put buying detected.", "Price struggling against major OI Resistance."];
-    avoidTradeZone = {
-      lowerBound: support > 0 ? support : underlyingValue * 0.98,
-      upperBound: underlyingValue,
-      reason: "Avoid shorting directly into major support clusters."
-    };
+    // avoidTradeZone removed from here
     instConclusion = {
       marketBias: "Bearish",
       confidence: confidence,
@@ -222,6 +210,65 @@ export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreE
       riskWarnings: ["Short squeeze potential", "Sudden bounce from support"],
       explanation: "Heavy call writing across multiple strikes indicates institutions are capping the upside, expecting a downward drift."
     };
+  }
+
+  let expectedRangeLower = support > 0 ? support : underlyingValue * 0.98;
+  let expectedRangeUpper = resistance !== Infinity ? resistance : underlyingValue * 1.02;
+  let rangeWidth = expectedRangeUpper - expectedRangeLower;
+  
+  let maxAllowedWidth = underlyingValue > 40000 ? 200 : 80;
+  let maxWidth = Math.min(maxAllowedWidth, rangeWidth * 0.25);
+  
+  let maxCombinedOI = 0;
+  let maxCombinedOIStrike = underlyingValue;
+  currentChain.forEach(r => {
+      const combined = (r.CE?.openInterest || 0) + (r.PE?.openInterest || 0);
+      if (combined > maxCombinedOI) {
+          maxCombinedOI = combined;
+          maxCombinedOIStrike = r.strikePrice;
+      }
+  });
+  
+  let atmStrike = currentChain.reduce((prev, curr) => (Math.abs(curr.strikePrice - underlyingValue) < Math.abs(prev.strikePrice - underlyingValue) ? curr : prev))?.strikePrice || underlyingValue;
+  
+  let isGammaPinned = Math.abs(atmStrike - maxPain) <= maxWidth && Math.abs(maxPain - maxCombinedOIStrike) <= maxWidth;
+  
+  let avoidTradeZone: import('./types').AvoidTradeZone;
+
+  if (isGammaPinned) {
+      let pinCenter = (atmStrike + maxPain + maxCombinedOIStrike) / 3;
+      let lowerBound = Math.round(pinCenter - (maxWidth / 2));
+      let upperBound = Math.round(pinCenter + (maxWidth / 2));
+      
+      avoidTradeZone = {
+          lowerBound,
+          upperBound,
+          reason: "Whipsaw zone due to heavy gamma pinning and balanced OI.",
+          marketState: bias === "Neutral" ? "🔴 Avoid" : "🟡 Caution",
+          longEntryTrigger: `Wait for 15-min candle close above ${upperBound}`,
+          shortEntryTrigger: `Wait for 15-min candle close below ${lowerBound}`,
+          confirmationRule: "Wait for a 5-minute candle close outside the zone.",
+          analyticsReasoning: [
+              "Heavy Gamma at ATM",
+              `Max Pain located at ${maxPain}`,
+              `Highest Combined OI at ${maxCombinedOIStrike}`,
+              "Smart Money showing neutral/balanced flows inside this range"
+          ]
+      };
+  } else {
+      avoidTradeZone = {
+          lowerBound: null,
+          upperBound: null,
+          reason: "No major Avoid Zone detected.",
+          marketState: "🟢 Trade Zone",
+          longEntryTrigger: `Enter near Support (${expectedRangeLower})`,
+          shortEntryTrigger: `Enter near Resistance (${expectedRangeUpper})`,
+          confirmationRule: "Wait for a 5-minute candle close confirming trend direction.",
+          analyticsReasoning: [
+              "No significant gamma pinning detected",
+              "Clear directional bias available"
+          ]
+      };
   }
 
   return {

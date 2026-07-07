@@ -291,15 +291,48 @@ export const WeeklyIntelligenceDashboard = () => {
         {/* Avoid Trade Zone & Historical Similarity */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
-          <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <h3 style={{ color: '#ef4444', marginBottom: '1rem', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <XCircle size={18} /> Avoid Trade Zone
-            </h3>
-            <div style={{ color: '#d1d5db', fontSize: '0.95rem' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#fff', marginBottom: '0.5rem' }}>
-                {aiStrategy.avoidTradeZone.lowerBound.toFixed(2)} - {aiStrategy.avoidTradeZone.upperBound.toFixed(2)}
+          <div style={{ backgroundColor: aiStrategy.avoidTradeZone.lowerBound ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.05)', padding: '1.5rem', borderRadius: '12px', border: `1px solid ${aiStrategy.avoidTradeZone.lowerBound ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+              <h3 style={{ color: aiStrategy.avoidTradeZone.lowerBound ? '#ef4444' : '#22c55e', margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {aiStrategy.avoidTradeZone.lowerBound ? <XCircle size={18} /> : <CheckCircle2 size={18} />} 
+                Avoid Trade Zone
+              </h3>
+              <div style={{ padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 'bold', backgroundColor: aiStrategy.avoidTradeZone.marketState === '🔴 Avoid' ? 'rgba(239, 68, 68, 0.2)' : aiStrategy.avoidTradeZone.marketState === '🟡 Caution' ? 'rgba(234, 179, 8, 0.2)' : 'rgba(34, 197, 94, 0.2)', color: aiStrategy.avoidTradeZone.marketState === '🔴 Avoid' ? '#ef4444' : aiStrategy.avoidTradeZone.marketState === '🟡 Caution' ? '#eab308' : '#22c55e' }}>
+                {aiStrategy.avoidTradeZone.marketState}
               </div>
-              <p style={{ margin: 0 }}><strong>Why?</strong> {aiStrategy.avoidTradeZone.reason}</p>
+            </div>
+            
+            <div style={{ color: '#d1d5db', fontSize: '0.95rem' }}>
+              {aiStrategy.avoidTradeZone.lowerBound ? (
+                <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#fff', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {aiStrategy.avoidTradeZone.lowerBound.toFixed(2)} <span style={{ color: '#6b7280', fontSize: '1rem' }}>to</span> {aiStrategy.avoidTradeZone.upperBound!.toFixed(2)}
+                </div>
+              ) : (
+                <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#22c55e', marginBottom: '1rem' }}>
+                  No major Avoid Zone detected.
+                </div>
+              )}
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong style={{ color: '#22c55e', width: '120px' }}>Long Trigger:</strong>
+                  <span style={{ color: '#fff' }}>{aiStrategy.avoidTradeZone.longEntryTrigger}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong style={{ color: '#ef4444', width: '120px' }}>Short Trigger:</strong>
+                  <span style={{ color: '#fff' }}>{aiStrategy.avoidTradeZone.shortEntryTrigger}</span>
+                </div>
+              </div>
+              
+              <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                <strong style={{ color: '#3b82f6', display: 'block', marginBottom: '0.25rem', fontSize: '0.8rem', textTransform: 'uppercase' }}>Confirmation Rule</strong>
+                <span style={{ color: '#d1d5db', fontSize: '0.85rem' }}>{aiStrategy.avoidTradeZone.confirmationRule}</span>
+              </div>
+              
+              <strong style={{ color: '#9ca3af', display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>Why? ({aiStrategy.avoidTradeZone.reason})</strong>
+              <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#d1d5db', fontSize: '0.85rem' }}>
+                {aiStrategy.avoidTradeZone.analyticsReasoning.map((r, i) => <li key={i} style={{ marginBottom: '0.25rem' }}>{r}</li>)}
+              </ul>
             </div>
           </div>
 

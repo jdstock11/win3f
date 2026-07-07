@@ -134,9 +134,14 @@ export interface TradeExecutionPlan {
 }
 
 export interface AvoidTradeZone {
-  lowerBound: number;
-  upperBound: number;
+  lowerBound: number | null;
+  upperBound: number | null;
   reason: string;
+  marketState: "🔴 Avoid" | "🟡 Caution" | "🟢 Trade Zone";
+  longEntryTrigger: string;
+  shortEntryTrigger: string;
+  confirmationRule: string;
+  analyticsReasoning: string[];
 }
 
 export interface AiStrategy extends TradeExecutionPlan {
