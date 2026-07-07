@@ -552,13 +552,28 @@ export default function RolloverAnalyzer() {
                 <span>Loaded Current: <strong className={currentData.length ? "text-emerald-400" : "text-slate-500"}>{currentData.length} rows</strong></span>
                 <span>Loaded Next: <strong className={nextData.length ? "text-emerald-400" : "text-slate-500"}>{nextData.length} rows</strong></span>
               </div>
-              <button 
-                onClick={runRolloverAnalysis}
-                disabled={!currentData.length || !nextData.length}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2 px-4 rounded-xl transition-colors shadow-lg shadow-indigo-500/20 disabled:shadow-none flex justify-center items-center gap-2"
-              >
-                <BarChart2 size={18} /> Analyze Rollover
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => {
+                    setCurrentData([]);
+                    setNextData([]);
+                    setAnalysisData([]);
+                    setCurrentFile("");
+                    setNextFile("");
+                    setSymbolFilter("NIFTY");
+                  }}
+                  className="w-1/3 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-2 rounded-xl transition-colors border border-slate-700 flex justify-center items-center gap-1 text-sm"
+                >
+                  Reset
+                </button>
+                <button 
+                  onClick={runRolloverAnalysis}
+                  disabled={!currentData.length || !nextData.length}
+                  className="w-2/3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-2 px-2 rounded-xl transition-colors shadow-lg shadow-indigo-500/20 disabled:shadow-none flex justify-center items-center gap-2 text-sm"
+                >
+                  <BarChart2 size={18} /> Analyze
+                </button>
+              </div>
             </div>
           </div>
         </div>
