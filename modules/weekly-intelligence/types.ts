@@ -72,11 +72,17 @@ export interface SmartMoneyFlow {
   strikePrice: number;
   type: "Institutional Call Writing" | "Institutional Put Writing" | "Institutional Call Buying" | "Institutional Put Buying" | "Normal";
   confidence: number;
+  oi: number;
+  oiChange: number;
+  volume: number;
+  volumeChange: number | "N/A";
+  premiumChange: number | "N/A";
+  suggestedAction: string;
 }
 
 export interface SupportResistanceLevel {
   strikePrice: number;
-  strength: number; // based on OI or Change in OI
+  strength: number;
   type: "Support" | "Resistance";
   method: "Max OI" | "Max Change in OI";
 }
@@ -84,15 +90,21 @@ export interface SupportResistanceLevel {
 // AI ENGINE TYPES
 export type TradeQuality = "Excellent" | "Good" | "Average" | "Weak";
 
+export interface ScoreComponent {
+  score: number;
+  confidence: number;
+  reason: string;
+}
+
 export interface ScoreEngineResult {
-  pcrScore: number;         // Max 20
-  oiScore: number;          // Max 20
-  smartMoneyScore: number;  // Max 15
-  supportScore: number;     // Max 10
-  resistanceScore: number;  // Max 10
-  volumeScore: number;      // Max 10
-  historicalScore: number;  // Max 15
-  marketStructureScore: number; // Max 10
+  pcr: ScoreComponent;         // Max 20
+  oi: ScoreComponent;          // Max 20
+  smartMoney: ScoreComponent;  // Max 15
+  support: ScoreComponent;     // Max 10
+  resistance: ScoreComponent;  // Max 10
+  volume: ScoreComponent;      // Max 10
+  historical: ScoreComponent;  // Max 15
+  marketStructure: ScoreComponent; // Max 10
   
   bullishTotal: number;
   bearishTotal: number;
@@ -101,7 +113,7 @@ export interface ScoreEngineResult {
   quality: TradeQuality;
 }
 
-export interface AiStrategy {
+export interface TradeExecutionPlan {
   bias: "Bullish" | "Bearish" | "Neutral";
   qualityScore: number;
   expectedRange: {
@@ -110,15 +122,102 @@ export interface AiStrategy {
   };
   preferredStrategy: string;
   suggestedEntry: string;
+  confirmationRule: string;
   suggestedStopLoss: string;
   target1: string;
   target2: string;
+  risk: string;
+  reward: string;
   riskReward: string;
+  confidence: number;
   reasons: string[];
+}
+
+export interface AvoidTradeZone {
+  lowerBound: number;
+  upperBound: number;
+  reason: string;
+}
+
+export interface AiStrategy extends TradeExecutionPlan {
+  avoidTradeZone: AvoidTradeZone;
+  institutionalConclusion: InstitutionalConclusion;
 }
 
 export interface HistoricalSimilarity {
   matchedOccurrences: number;
+  breakdown: {
+    bullish: number;
+    bearish: number;
+    neutral: number;
+  };
   averageNextDayMove: string;
+  bestOutcome: string;
+  worstOutcome: string;
+  topMatches: string[];
   historicalSuccessRatio: number; // %
+  confidenceScore: number;
+}
+
+export interface OIInterpretationDetails {
+  currentOI: number;
+  previousOI: number | "N/A";
+  oiChange: number;
+  currentPremium: number;
+  previousPremium: number | "N/A";
+  premiumChange: number | "N/A";
+  volume: number;
+  volumeChange: number | "N/A";
+  classificationLogic: string;
+  reasoning: string;
+}
+
+export interface TopOIRow {
+  strike: number;
+  oi: number;
+  oiChange: number;
+  volume: number;
+  volumeChange: number | "N/A";
+  premiumChange: number | "N/A";
+  classification: string;
+  confidence: string;
+  evidence: string;
+  suggestedAction: string;
+  riskLevel: string;
+  details: OIInterpretationDetails;
+}
+
+export interface TopOIAdditionsReductions {
+  ceAdditions: TopOIRow[];
+  peAdditions: TopOIRow[];
+  ceReductions: TopOIRow[];
+  peReductions: TopOIRow[];
+}
+
+export interface VolatilityExpectedMove {
+  atmStrike: number;
+  straddlePremium: number | "N/A";
+  expectedDailyMove: number | "N/A";
+  impliedRangeUpper: number | "N/A";
+  impliedRangeLower: number | "N/A";
+}
+
+export interface DailyPCRRow {
+  date: string;
+  ceOI: number;
+  peOI: number;
+  pcr: number;
+  dailyChange: number | "N/A";
+  interpretation: string;
+}
+
+export interface InstitutionalConclusion {
+  marketBias: string;
+  confidence: number;
+  keyReasons: string[];
+  bestStrategy: string;
+  conservativeApproach: string;
+  aggressiveApproach: string;
+  riskWarnings: string[];
+  explanation: string;
 }
