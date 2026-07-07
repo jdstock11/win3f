@@ -17,6 +17,7 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import StrategyEngine, { OptionRow, Dataset } from "./StrategyEngine";
 import CustomStrategyBuilder from "./CustomStrategyBuilder";
+import InstitutionalDecisionEngine from "./InstitutionalDecisionEngine";
 
 // --- Helper Components ---
 
@@ -156,12 +157,16 @@ export default function OptionAnalyzer() {
       parsedData.push({
         strike,
         callOI,
+        callOIChange: parseNumber(row[2]),
         callVol: parseNumber(row[3]),
         callIV: parseNumber(row[4]),
         callLTP: parseNumber(row[5]),
+        callLTPChange: parseNumber(row[6]),
+        putLTPChange: parseNumber(row[16]),
         putLTP: parseNumber(row[17]),
         putIV: parseNumber(row[18]),
         putVol: parseNumber(row[19]),
+        putOIChange: parseNumber(row[20]),
         putOI,
       });
 
@@ -223,13 +228,17 @@ export default function OptionAnalyzer() {
           const row = {
             strike: d.strikePrice,
             callOI: d.CE?.openInterest || 0,
+            callOIChange: d.CE?.changeinOpenInterest || 0,
             callVol: d.CE?.totalTradedVolume || 0,
             callIV: d.CE?.impliedVolatility || 0,
             callLTP: d.CE?.lastPrice || 0,
+            callLTPChange: d.CE?.change || 0,
             putOI: d.PE?.openInterest || 0,
+            putOIChange: d.PE?.changeinOpenInterest || 0,
             putVol: d.PE?.totalTradedVolume || 0,
             putIV: d.PE?.impliedVolatility || 0,
-            putLTP: d.PE?.lastPrice || 0
+            putLTP: d.PE?.lastPrice || 0,
+            putLTPChange: d.PE?.change || 0
           };
           const diff = Math.abs(currentAtm - d.strikePrice);
           if (diff < minDiff) {
@@ -615,6 +624,7 @@ export default function OptionAnalyzer() {
                 </ResponsiveContainer>
               </div>
             </div>
+            {activeDataset && <InstitutionalDecisionEngine dataset={activeDataset} />}
           </div>
         )}
 

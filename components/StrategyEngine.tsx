@@ -21,6 +21,10 @@ export interface OptionRow {
   putVol: number;
   putLTP: number;
   putIV?: number;
+  callOIChange?: number;
+  callLTPChange?: number;
+  putOIChange?: number;
+  putLTPChange?: number;
 }
 
 export interface Dataset {
