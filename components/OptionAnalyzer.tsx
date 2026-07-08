@@ -18,6 +18,7 @@ import jsPDF from "jspdf";
 import StrategyEngine, { OptionRow, Dataset } from "./StrategyEngine";
 import CustomStrategyBuilder from "./CustomStrategyBuilder";
 import InstitutionalDecisionEngine from "./InstitutionalDecisionEngine";
+import IntradayComparison from "./IntradayComparison";
 
 // --- Helper Components ---
 
@@ -105,6 +106,10 @@ export default function OptionAnalyzer() {
 
   // UI State
   const [activeTab, setActiveTab] = useState<"Overview" | "StrategyEngine" | "SmartMoney" | "Rollover" | "CustomLab">("Overview");
+  
+  // Intraday Comparison State
+  const [previousUpload, setPreviousUpload] = useState<{timestamp: string, dataset: Dataset} | null>(null);
+  const [currentUpload, setCurrentUpload] = useState<{timestamp: string, dataset: Dataset} | null>(null);
 
   // --- Parsing & Data Management ---
 
@@ -114,18 +119,27 @@ export default function OptionAnalyzer() {
     return parseFloat(val.toString().replace(/,/g, "")) || 0;
   };
 
-  const extractMetadata = (filename: string) => {
+  const extractMetadata = (filename: string, rows: any[]) => {
     let symbol = "UNKNOWN";
     let expiry = "UNKNOWN EXPIRY";
 
-    const upperName = filename.toUpperCase();
-
-    // Auto detect standard symbols
-    const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY"];
-    for (const s of symbols) {
-      if (upperName.includes(s)) {
-        symbol = s;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      const rowStr = (rows[i] || []).join(" ").toUpperCase();
+      const match = rowStr.match(/(?:UNDERLYING|SYMBOL|INSTRUMENT NAME|INDEX)[\s:-]*([A-Z]+)/);
+      if (match && match[1] && match[1] !== 'INDEX' && match[1] !== 'VALUE') {
+        symbol = match[1];
         break;
+      }
+    }
+
+    const upperName = filename.toUpperCase();
+    if (symbol === "UNKNOWN") {
+      const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY"];
+      for (const s of symbols) {
+        if (upperName.includes(s)) {
+          symbol = s;
+          break;
+        }
       }
     }
 
@@ -190,7 +204,7 @@ export default function OptionAnalyzer() {
       }
     });
 
-    const { symbol, expiry } = extractMetadata(filename);
+    const { symbol, expiry } = extractMetadata(filename, rows);
     const newDataset: Dataset = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       symbol,
@@ -202,6 +216,27 @@ export default function OptionAnalyzer() {
     setDatasets(prev => [...prev, newDataset]);
     if (!activeDatasetId) setActiveDatasetId(newDataset.id);
     else if (!compareDatasetId) setCompareDatasetId(newDataset.id);
+
+    // Intraday Comparison Cache Integration
+    fetch(`/api/cache?symbol=${symbol}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.data) {
+          setPreviousUpload(data.data);
+        } else {
+          setPreviousUpload(null);
+        }
+        
+        const curr = { timestamp: new Date().toISOString(), dataset: newDataset };
+        setCurrentUpload(curr);
+        
+        fetch('/api/cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, dataset: newDataset, timestamp: curr.timestamp })
+        });
+      })
+      .catch(err => console.error("Cache error", err));
   };
 
   const fetchLiveNSEData = async (symbol: string = "NIFTY") => {
@@ -625,6 +660,7 @@ export default function OptionAnalyzer() {
               </div>
             </div>
             {activeDataset && <InstitutionalDecisionEngine dataset={activeDataset} />}
+            {activeDataset && <IntradayComparison previousUpload={previousUpload} currentUpload={currentUpload} currentSymbol={activeDataset.symbol} />}
           </div>
         )}
 
