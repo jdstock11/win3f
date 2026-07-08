@@ -123,27 +123,48 @@ export default function OptionAnalyzer() {
     let symbol = "UNKNOWN";
     let expiry = "UNKNOWN EXPIRY";
 
-    for (let i = 0; i < Math.min(rows.length, 5); i++) {
-      const rowStr = (rows[i] || []).join(" ").toUpperCase();
-      const match = rowStr.match(/(?:UNDERLYING|SYMBOL|INSTRUMENT NAME|INDEX)[\s:-]*([A-Z]+)/);
-      if (match && match[1] && match[1] !== 'INDEX' && match[1] !== 'VALUE') {
-        symbol = match[1];
-        break;
-      }
-    }
+    const detectSymbol = () => {
+      // 1-6: Check CSV Rows
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i] || [];
+        const rowStr = row.join(" ").toUpperCase();
+        
+        // Specific Regex for fields
+        const match = rowStr.match(/(?:UNDERLYING INDEX|UNDERLYING|SYMBOL|INSTRUMENT NAME|CONTRACT NAME)[\s:,-]*([A-Z]{3,15})/);
+        
+        if (match && match[1] && !['INDEX', 'VALUE', 'NAME', 'SYMBOL'].includes(match[1])) {
+          return match[1];
+        }
 
-    const upperName = filename.toUpperCase();
-    if (symbol === "UNKNOWN") {
-      const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY"];
-      for (const s of symbols) {
-        if (upperName.includes(s)) {
-          symbol = s;
-          break;
+        // Check adjacent columns
+        for (let j = 0; j < row.length - 1; j++) {
+           const col1 = String(row[j]).toUpperCase().trim();
+           const col2 = String(row[j+1]).toUpperCase().trim();
+           if (['UNDERLYING', 'SYMBOL', 'UNDERLYING INDEX', 'INSTRUMENT NAME', 'CONTRACT NAME'].includes(col1)) {
+              if (col2 && col2 !== '' && col2 !== '-') return col2;
+           }
         }
       }
-    }
 
-    const dateMatch = upperName.match(/(\d{1,2}[A-Z]{3}\d{2,4})|(\d{1,2}-[A-Z]{3}-\d{2,4})/);
+      // 7: Filename fallback
+      const filenameMatch = filename.toUpperCase().match(/-(NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY|SENSEX|[A-Z]{3,15})-/);
+      if (filenameMatch && filenameMatch[1]) {
+        return filenameMatch[1];
+      }
+
+      const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY", "SBIN"];
+      for (const s of symbols) {
+        if (filename.toUpperCase().includes(s)) {
+          return s;
+        }
+      }
+
+      return "UNKNOWN";
+    };
+
+    symbol = detectSymbol();
+
+    const dateMatch = filename.toUpperCase().match(/(\d{1,2}[A-Z]{3}\d{2,4})|(\d{1,2}-[A-Z]{3}-\d{2,4})/);
     if (dateMatch) {
       expiry = dateMatch[0];
     } else {
@@ -309,10 +330,9 @@ export default function OptionAnalyzer() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
-
+    if (!files) return;
     setLoading(true);
 
     Array.from(files).forEach(file => {
@@ -320,11 +340,6 @@ export default function OptionAnalyzer() {
         Papa.parse(file, {
           complete: (results) => {
             processData(results.data, file.name);
-            setLoading(false);
-          },
-          error: (error) => {
-            console.error(error);
-            alert(`Error reading ${file.name}`);
             setLoading(false);
           }
         });
@@ -335,8 +350,8 @@ export default function OptionAnalyzer() {
           const wb = XLSX.read(bstr, { type: "binary" });
           const wsname = wb.SheetNames[0];
           const ws = wb.Sheets[wsname];
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-          processData(rows, file.name);
+          const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          processData(data, file.name);
           setLoading(false);
         };
         reader.readAsBinaryString(file);
@@ -344,6 +359,22 @@ export default function OptionAnalyzer() {
     });
 
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const resetWorkspace = async () => {
+    if (activeDataset?.symbol) {
+      try {
+        await fetch(`/api/cache?symbol=${activeDataset.symbol}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error("Failed to delete cache", err);
+      }
+    }
+    setDatasets([]);
+    setActiveDatasetId(null);
+    setCompareDatasetId(null);
+    setPreviousUpload(null);
+    setCurrentUpload(null);
+    setActiveTab("Overview");
   };
 
   const formatNum = (num: number) => new Intl.NumberFormat('en-IN').format(num);
@@ -539,6 +570,13 @@ export default function OptionAnalyzer() {
               <Upload size={16} />
             </button>
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv, .xlsx, .xls" multiple style={{ display: "none" }} />
+            <button
+              className="bg-red-500/20 hover:bg-red-500/30 text-red-500 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 border border-red-500/30"
+              onClick={resetWorkspace}
+              title="Reset Workspace"
+            >
+              <RefreshCw size={16} /> <span className="hidden sm:inline">Reset</span>
+            </button>
           </div>
 
           {/* Right: Actions */}

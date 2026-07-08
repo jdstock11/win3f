@@ -69,3 +69,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to write cache' }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const symbol = searchParams.get('symbol');
+
+  if (!symbol) {
+    return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+  }
+
+  try {
+    await ensureCacheDir();
+    const filePath = path.join(CACHE_DIR, `${symbol.toUpperCase()}.json`);
+    
+    let exists = true;
+    try {
+      await fs.access(filePath);
+    } catch {
+      exists = false;
+    }
+
+    if (exists) {
+      await fs.unlink(filePath);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting cache:', error);
+    return NextResponse.json({ error: 'Failed to delete cache' }, { status: 500 });
+  }
+}
