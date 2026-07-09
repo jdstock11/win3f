@@ -21,6 +21,8 @@ export interface OptionRow {
   putVol: number;
   putLTP: number;
   putIV?: number;
+  callLtpRaw?: string;
+  putLtpRaw?: string;
   callOIChange?: number;
   callLTPChange?: number;
   putOIChange?: number;
@@ -31,6 +33,7 @@ export interface Dataset {
   id: string;
   symbol: string;
   expiry: string;
+  fileName?: string;
   data: OptionRow[];
   atm: number;
 }

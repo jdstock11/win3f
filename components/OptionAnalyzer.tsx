@@ -196,9 +196,11 @@ export default function OptionAnalyzer() {
         callVol: parseNumber(row[3]),
         callIV: parseNumber(row[4]),
         callLTP: parseNumber(row[5]),
+        callLtpRaw: row[5] != null ? String(row[5]).trim() : "0",
         callLTPChange: parseNumber(row[6]),
         putLTPChange: parseNumber(row[16]),
         putLTP: parseNumber(row[17]),
+        putLtpRaw: row[17] != null ? String(row[17]).trim() : "0",
         putIV: parseNumber(row[18]),
         putVol: parseNumber(row[19]),
         putOIChange: parseNumber(row[20]),
@@ -230,6 +232,7 @@ export default function OptionAnalyzer() {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       symbol,
       expiry,
+      fileName: filename,
       data: parsedData,
       atm: currentAtm,
     };
@@ -288,12 +291,14 @@ export default function OptionAnalyzer() {
             callVol: d.CE?.totalTradedVolume || 0,
             callIV: d.CE?.impliedVolatility || 0,
             callLTP: d.CE?.lastPrice || 0,
+            callLtpRaw: String(d.CE?.lastPrice || 0),
             callLTPChange: d.CE?.change || 0,
             putOI: d.PE?.openInterest || 0,
             putOIChange: d.PE?.changeinOpenInterest || 0,
             putVol: d.PE?.totalTradedVolume || 0,
             putIV: d.PE?.impliedVolatility || 0,
             putLTP: d.PE?.lastPrice || 0,
+            putLtpRaw: String(d.PE?.lastPrice || 0),
             putLTPChange: d.PE?.change || 0
           };
           const diff = Math.abs(currentAtm - d.strikePrice);
@@ -521,8 +526,14 @@ export default function OptionAnalyzer() {
                 </span>
               </h1>
               <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)] font-medium">
-                <span className="flex items-center gap-1 text-white"><Layers size={14} color="#3b82f6" /> {activeDataset?.symbol}</span>
-                <span className="w-1 h-1 rounded-full bg-gray-500"></span>
+                {activeDataset?.fileName ? (
+                  <span className="flex items-center gap-1 text-white max-w-[200px] sm:max-w-[300px] truncate" title={activeDataset.fileName}>
+                    <FileSpreadsheet size={14} color="#3b82f6" className="shrink-0" /> {activeDataset.fileName}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-white"><Layers size={14} color="#3b82f6" /> {activeDataset?.symbol || "N/A"}</span>
+                )}
+                <span className="w-1 h-1 rounded-full bg-gray-500 shrink-0"></span>
                 <span className="flex items-center gap-1"><Calendar size={14} color="#8b5cf6" /> Current: {activeDataset?.expiry}</span>
                 {compareDataset && (
                   <>

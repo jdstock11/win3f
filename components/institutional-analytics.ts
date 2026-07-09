@@ -8,6 +8,7 @@ export interface TopSignalRow {
   oiChange: number | "N/A";
   vol: number;
   volChange: number | "N/A"; 
+  ltp: string | number;
   premChange: number | "N/A";
   confidence: number;
   action: string;
@@ -90,11 +91,11 @@ export const generateInstitutionalData = (data: OptionRow[]) => {
     });
 
     const ceObj: TopSignalRow = {
-      strike: row.strike, oi: row.callOI, oiChange: row.callOIChange ?? "N/A", vol: row.callVol, volChange: "N/A", premChange: row.callLTPChange ?? "N/A", confidence: ceConf, action: getAction(ceSignal)
+      strike: row.strike, oi: row.callOI, oiChange: row.callOIChange ?? "N/A", vol: row.callVol, volChange: "N/A", ltp: row.callLtpRaw ?? row.callLTP, premChange: row.callLTPChange ?? "N/A", confidence: ceConf, action: getAction(ceSignal)
     };
     
     const peObj: TopSignalRow = {
-      strike: row.strike, oi: row.putOI, oiChange: row.putOIChange ?? "N/A", vol: row.putVol, volChange: "N/A", premChange: row.putLTPChange ?? "N/A", confidence: peConf, action: getAction(peSignal)
+      strike: row.strike, oi: row.putOI, oiChange: row.putOIChange ?? "N/A", vol: row.putVol, volChange: "N/A", ltp: row.putLtpRaw ?? row.putLTP, premChange: row.putLTPChange ?? "N/A", confidence: peConf, action: getAction(peSignal)
     };
 
     // CE Allocations

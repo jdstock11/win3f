@@ -17,6 +17,7 @@ const TableRow = ({ row, type }: { row: TopSignalRow, type: 'bull' | 'bear' }) =
     <td className={`p-3 font-medium ${row.oiChange === "N/A" ? 'text-gray-500' : (row.oiChange > 0 ? 'text-[#10b981]' : 'text-[#ef4444]')}`}>{row.oiChange}</td>
     <td className="p-3 text-gray-300">{row.vol.toLocaleString()}</td>
     <td className="p-3 text-gray-500">{row.volChange}</td>
+    <td className="p-3 text-white">{row.ltp}</td>
     <td className={`p-3 font-medium ${row.premChange === "N/A" ? 'text-gray-500' : ((row.premChange as number) > 0 ? 'text-[#10b981]' : 'text-[#ef4444]')}`}>{row.premChange}</td>
     <td className="p-3"><div className="w-full bg-[#161925] rounded-full h-2"><div className="bg-[#8b5cf6] h-2 rounded-full" style={{ width: `${row.confidence}%` }}></div></div></td>
     <td className={`p-3 text-sm ${type === 'bull' ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>{row.action}</td>
@@ -139,6 +140,7 @@ export default function InstitutionalDecisionEngine({ dataset }: Props) {
                     <th className="p-3">OI Change</th>
                     <th className="p-3">Volume</th>
                     <th className="p-3">Vol Change</th>
+                    <th className="p-3">LTP</th>
                     <th className="p-3">Prem Change</th>
                     <th className="p-3">Confidence</th>
                     <th className="p-3 rounded-tr-lg">Suggested Action</th>
