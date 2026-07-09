@@ -221,12 +221,14 @@ export default function InstitutionalDecisionEngine({ dataset }: Props) {
             <thead className="sticky top-0 bg-[#0f111a] z-10 shadow-md">
               <tr className="text-gray-400 uppercase tracking-wider text-xs">
                 <th className="p-3 border-b border-[var(--border-color)]">CE Classification</th>
+                <th className="p-3 border-b border-[var(--border-color)]">CE LTP</th>
                 <th className="p-3 border-b border-[var(--border-color)]">CE LTP Chg</th>
                 <th className="p-3 border-b border-[var(--border-color)]">CE OI Chg</th>
                 <th className="p-3 border-b border-[var(--border-color)]">CE OI</th>
                 <th className="p-3 border-b border-[var(--border-color)] bg-[#1a1d2d] text-white text-center rounded-t-lg">STRIKE</th>
                 <th className="p-3 border-b border-[var(--border-color)]">PE OI</th>
                 <th className="p-3 border-b border-[var(--border-color)]">PE OI Chg</th>
+                <th className="p-3 border-b border-[var(--border-color)]">PE LTP</th>
                 <th className="p-3 border-b border-[var(--border-color)]">PE LTP Chg</th>
                 <th className="p-3 border-b border-[var(--border-color)]">PE Classification</th>
               </tr>
@@ -235,12 +237,14 @@ export default function InstitutionalDecisionEngine({ dataset }: Props) {
               {analytics.matrix.map((row, i) => (
                 <tr key={i} className={`border-b border-[var(--border-color)] hover:bg-[#1e2233] transition-colors ${row.strike === atm ? 'bg-blue-900/20' : ''}`}>
                   <td className={`p-3 font-medium ${row.ceSignal.includes('Build-up') ? (row.ceSignal.includes('Long') ? 'text-green-400' : 'text-red-400') : 'text-gray-400'}`}>{row.ceSignal}</td>
+                  <td className="p-3 font-medium text-white">{row.ceLTP}</td>
                   <td className="p-3">{row.ceLTPChange}</td>
                   <td className="p-3">{row.ceOIChange}</td>
                   <td className="p-3 text-red-300">{row.ceOI.toLocaleString()}</td>
                   <td className="p-3 font-bold text-white bg-[#161925] text-center border-l border-r border-[var(--border-color)]">{row.strike}</td>
                   <td className="p-3 text-green-300">{row.peOI.toLocaleString()}</td>
                   <td className="p-3">{row.peOIChange}</td>
+                  <td className="p-3 font-medium text-white">{row.peLTP}</td>
                   <td className="p-3">{row.peLTPChange}</td>
                   <td className={`p-3 font-medium ${row.peSignal.includes('Build-up') ? (row.peSignal.includes('Long') ? 'text-green-400' : 'text-red-400') : 'text-gray-400'}`}>{row.peSignal}</td>
                 </tr>

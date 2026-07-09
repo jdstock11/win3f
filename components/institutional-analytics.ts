@@ -21,6 +21,8 @@ export interface OptionMatrixRow {
   ceOIChange: number | "N/A";
   peOIChange: number | "N/A";
   volume: number;
+  ceLTP: string | number;
+  peLTP: string | number;
   ceLTPChange: number | "N/A";
   peLTPChange: number | "N/A";
   ceSignal: Signal;
@@ -82,6 +84,8 @@ export const generateInstitutionalData = (data: OptionRow[]) => {
       ceOIChange: row.callOIChange !== undefined && !isNaN(row.callOIChange) ? row.callOIChange : "N/A",
       peOIChange: row.putOIChange !== undefined && !isNaN(row.putOIChange) ? row.putOIChange : "N/A",
       volume: row.callVol + row.putVol,
+      ceLTP: row.callLtpRaw ?? row.callLTP,
+      peLTP: row.putLtpRaw ?? row.putLTP,
       ceLTPChange: row.callLTPChange !== undefined && !isNaN(row.callLTPChange) ? row.callLTPChange : "N/A",
       peLTPChange: row.putLTPChange !== undefined && !isNaN(row.putLTPChange) ? row.putLTPChange : "N/A",
       ceSignal,
