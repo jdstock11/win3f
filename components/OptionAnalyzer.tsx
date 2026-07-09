@@ -19,6 +19,7 @@ import StrategyEngine, { OptionRow, Dataset } from "./StrategyEngine";
 import CustomStrategyBuilder from "./CustomStrategyBuilder";
 import InstitutionalDecisionEngine from "./InstitutionalDecisionEngine";
 import IntradayComparison from "./IntradayComparison";
+import IntradayInstitutionalComparisonEngine from "./IntradayInstitutionalComparisonEngine";
 
 // --- Helper Components ---
 
@@ -851,6 +852,13 @@ export default function OptionAnalyzer() {
           </div>
         )}
 
+        {activeDataset && (
+          <IntradayInstitutionalComparisonEngine
+            previousUpload={previousUpload}
+            currentUpload={currentUpload}
+            currentSymbol={activeDataset.symbol}
+          />
+        )}
       </div>
     </div>
   );
