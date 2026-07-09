@@ -4,6 +4,8 @@ import path from 'path';
 
 const CACHE_DIR = path.join(process.cwd(), 'cache');
 
+export const dynamic = 'force-dynamic';
+
 async function ensureCacheDir() {
   try {
     await fs.access(CACHE_DIR);

@@ -243,7 +243,7 @@ export default function OptionAnalyzer() {
     else if (!compareDatasetId) setCompareDatasetId(newDataset.id);
 
     // Intraday Comparison Cache Integration
-    fetch(`/api/cache?symbol=${symbol}`)
+    fetch(`/api/cache?symbol=${symbol}&t=${Date.now()}`, { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
         if (data.data) {

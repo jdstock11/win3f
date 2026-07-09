@@ -35,8 +35,8 @@ export default function IntradayInstitutionalComparisonEngine({ previousUpload, 
       const ceLtpDiff = c.callLTP - p.callLTP;
       const peLtpDiff = c.putLTP - p.putLTP;
 
-      const ceIvDiff = c.callIV - p.callIV;
-      const peIvDiff = c.putIV - p.putIV;
+      const ceIvDiff = (c.callIV || 0) - (p.callIV || 0);
+      const peIvDiff = (c.putIV || 0) - (p.putIV || 0);
 
       // AI Classification logic
       let ceClass = "Neutral";
