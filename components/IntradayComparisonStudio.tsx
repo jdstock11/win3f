@@ -248,6 +248,27 @@ const ConfBadge = ({ label }: { label: string }) => {
   return <Badge label={label} type="neutral" />;
 };
 
+// Premium Behaviour badge — derived purely from LTP diff, no new calculation
+const premBehaviour = (ltpDiff: number): { label: string; color: string } => {
+  if (ltpDiff > 0.05)  return { label: "Premium Expansion", color: "#10b981" };
+  if (ltpDiff < -0.05) return { label: "Premium Decay",     color: "#ef4444" };
+  return                      { label: "Flat Premium",      color: "#64748b" };
+};
+const PremBadge = ({ ltpDiff }: { ltpDiff: number }) => {
+  const { label, color } = premBehaviour(ltpDiff);
+  return (
+    <span
+      title={label}
+      style={{
+        display: "inline-block", padding: "1px 7px", borderRadius: "6px",
+        fontSize: "10px", fontWeight: 700, letterSpacing: "0.02em",
+        background: `${color}18`, color, border: `1px solid ${color}35`,
+        whiteSpace: "nowrap",
+      }}
+    >{label}</span>
+  );
+};
+
 // Intensity-based color palette (unchanged logic – only presentation)
 const getChipStyle = (val: number, max: number): React.CSSProperties => {
   if (max === 0 || val === 0) return {
@@ -1536,67 +1557,90 @@ export default function IntradayComparisonStudio() {
           </SectionCard>
 
           {/* SECTION 4: Top 10 Volume Changes */}
-          <SectionCard title="4 · Top 10 Volume Increase / Decrease" icon={BarChart2} color="#f59e0b">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* CE Volume Increase */}
-              <div>
-                <p className="text-xs font-bold text-red-400 uppercase tracking-wider mb-3">CE — Volume Increase</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/10 text-[var(--text-secondary)]">
-                      <th className="p-2 text-left">Strike</th>
-                      <th className="p-2 text-right">Prev Vol</th>
-                      <th className="p-2 text-right">Curr Vol</th>
-                      <th className="p-2 text-right">Diff</th>
-                      <th className="p-2 text-right">%</th>
-                    </tr></thead>
-                    <tbody>{analysis.top10CEVolInc.filter(r => r.ceVolDiff > 0).map(r => (
-                      <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                        <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                        <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev.callVol)}</td>
-                        <td className="p-2 text-right text-red-300">{fmt(r.curr.callVol)}</td>
-                        <td className="p-2 text-right"><DiffCell val={r.ceVolDiff} /></td>
-                        <td className="p-2 text-right text-red-400">{fmtPct(r.ceVolPct)}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
+          <SectionCard title="4 · Top 10 Volume Increase" icon={BarChart2} color="#f59e0b">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {([
+                {
+                  label: "CE — Volume Increase", headColor: "text-red-400",
+                  data: analysis.top10CEVolInc.filter(r => r.ceVolDiff > 0),
+                  volKey: "ceVolDiff" as const, volPct: "ceVolPct" as const,
+                  prevVol: "callVol" as const, currVol: "callVol" as const,
+                  ltpKey: "ceLTPDiff" as const, ltpPct: "ceLTPPct" as const,
+                  prevLTP: "callLTP" as const, currLTP: "callLTP" as const,
+                },
+                {
+                  label: "PE — Volume Increase", headColor: "text-emerald-400",
+                  data: analysis.top10PEVolInc.filter(r => r.peVolDiff > 0),
+                  volKey: "peVolDiff" as const, volPct: "peVolPct" as const,
+                  prevVol: "putVol" as const, currVol: "putVol" as const,
+                  ltpKey: "peLTPDiff" as const, ltpPct: "peLTPPct" as const,
+                  prevLTP: "putLTP" as const, currLTP: "putLTP" as const,
+                },
+              ] as const).map(({ label, headColor, data, volKey, volPct, prevVol, currVol, ltpKey, ltpPct, prevLTP, currLTP }) => (
+                <div key={label}>
+                  <p className={`text-xs font-bold ${headColor} uppercase tracking-wider mb-3`}>{label}</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b border-white/10 text-[var(--text-secondary)]">
+                        <th className="p-2 text-left">Strike</th>
+                        <th className="p-2 text-right">Prev Vol</th>
+                        <th className="p-2 text-right">Curr Vol</th>
+                        <th className="p-2 text-right">Vol Diff</th>
+                        <th className="p-2 text-right">Vol %</th>
+                        <th className="p-2 text-right border-l border-white/10">Prev LTP</th>
+                        <th className="p-2 text-right">Curr LTP</th>
+                        <th className="p-2 text-right">LTP Diff</th>
+                        <th className="p-2 text-right">LTP %</th>
+                        <th className="p-2 text-left border-l border-white/10">Premium</th>
+                      </tr></thead>
+                      <tbody>{data.map(r => {
+                        const ld = r[ltpKey] as number;
+                        const lp = r[ltpPct] as number;
+                        return (
+                          <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
+                            <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
+                            <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev[prevVol])}</td>
+                            <td className="p-2 text-right text-white">{fmt(r.curr[currVol])}</td>
+                            <td className="p-2 text-right"><DiffCell val={r[volKey] as number} /></td>
+                            <td className="p-2 text-right" style={{ color: (r[volKey] as number) >= 0 ? "#10b981" : "#ef4444" }}>{fmtPct(r[volPct] as number)}</td>
+                            <td className="p-2 text-right text-[var(--text-secondary)] border-l border-white/10">{r.prev[prevLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right text-white">{r.curr[currLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right" title={premBehaviour(ld).label}><DiffCell val={ld} /></td>
+                            <td className="p-2 text-right" style={{ color: ld > 0 ? "#10b981" : ld < 0 ? "#ef4444" : "#64748b" }}>{fmtPct(lp)}</td>
+                            <td className="p-2 border-l border-white/10"><PremBadge ltpDiff={ld} /></td>
+                          </tr>
+                        );
+                      })}</tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-              {/* PE Volume Increase */}
-              <div>
-                <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3">PE — Volume Increase</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/10 text-[var(--text-secondary)]">
-                      <th className="p-2 text-left">Strike</th>
-                      <th className="p-2 text-right">Prev Vol</th>
-                      <th className="p-2 text-right">Curr Vol</th>
-                      <th className="p-2 text-right">Diff</th>
-                      <th className="p-2 text-right">%</th>
-                    </tr></thead>
-                    <tbody>{analysis.top10PEVolInc.filter(r => r.peVolDiff > 0).map(r => (
-                      <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                        <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                        <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev.putVol)}</td>
-                        <td className="p-2 text-right text-emerald-300">{fmt(r.curr.putVol)}</td>
-                        <td className="p-2 text-right"><DiffCell val={r.peVolDiff} /></td>
-                        <td className="p-2 text-right text-emerald-400">{fmtPct(r.peVolPct)}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </div>
-
+              ))}
             </div>
           </SectionCard>
 
           {/* SECTION 5: Top 10 OI Increase */}
           <SectionCard title="5 · Top 10 OI Increase" icon={TrendingUp} color="#10b981">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {[
-                { label: "CE — OI Increase", color: "text-red-400", data: analysis.top10CEOIInc, oiKey: "ceOIDiff" as const, oiPct: "ceOIPct" as const, prev: "callOI" as const, curr2: "callOI" as const, cls: "ceClass" as const, conf: "ceConfidence" as const },
-                { label: "PE — OI Increase", color: "text-emerald-400", data: analysis.top10PEOIInc, oiKey: "peOIDiff" as const, oiPct: "peOIPct" as const, prev: "putOI" as const, curr2: "putOI" as const, cls: "peClass" as const, conf: "peConfidence" as const },
-              ].map(({ label, color, data, oiKey, oiPct, prev, curr2, cls, conf }) => (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {([
+                {
+                  label: "CE — OI Increase", color: "text-red-400",
+                  data: analysis.top10CEOIInc.filter(r => r.ceOIDiff > 0),
+                  oiKey: "ceOIDiff" as const, oiPct: "ceOIPct" as const,
+                  prevOI: "callOI" as const, currOI: "callOI" as const,
+                  ltpKey: "ceLTPDiff" as const, ltpPct: "ceLTPPct" as const,
+                  prevLTP: "callLTP" as const, currLTP: "callLTP" as const,
+                  cls: "ceClass" as const, conf: "ceConfidence" as const,
+                },
+                {
+                  label: "PE — OI Increase", color: "text-emerald-400",
+                  data: analysis.top10PEOIInc.filter(r => r.peOIDiff > 0),
+                  oiKey: "peOIDiff" as const, oiPct: "peOIPct" as const,
+                  prevOI: "putOI" as const, currOI: "putOI" as const,
+                  ltpKey: "peLTPDiff" as const, ltpPct: "peLTPPct" as const,
+                  prevLTP: "putLTP" as const, currLTP: "putLTP" as const,
+                  cls: "peClass" as const, conf: "peConfidence" as const,
+                },
+              ] as const).map(({ label, color, data, oiKey, oiPct, prevOI, currOI, ltpKey, ltpPct, prevLTP, currLTP, cls, conf }) => (
                 <div key={label}>
                   <p className={`text-xs font-bold ${color} uppercase tracking-wider mb-3`}>{label}</p>
                   <div className="overflow-x-auto">
@@ -1605,20 +1649,34 @@ export default function IntradayComparisonStudio() {
                         <th className="p-2 text-left">Strike</th>
                         <th className="p-2 text-right">Prev OI</th>
                         <th className="p-2 text-right">Curr OI</th>
-                        <th className="p-2 text-right">Diff</th>
+                        <th className="p-2 text-right">OI Diff</th>
+                        <th className="p-2 text-right border-l border-white/10">Prev LTP</th>
+                        <th className="p-2 text-right">Curr LTP</th>
+                        <th className="p-2 text-right">LTP Diff</th>
+                        <th className="p-2 text-right">LTP %</th>
+                        <th className="p-2 text-left border-l border-white/10">Premium</th>
                         <th className="p-2 text-left">Classification</th>
                         <th className="p-2 text-center">Conf</th>
                       </tr></thead>
-                      <tbody>{data.filter(r => (r[oiKey] as number) > 0).map(r => (
-                        <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                          <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                          <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev[prev])}</td>
-                          <td className="p-2 text-right text-white">{fmt(r.curr[curr2])}</td>
-                          <td className="p-2 text-right"><DiffCell val={r[oiKey] as number} pct={r[oiPct] as number} /></td>
-                          <td className="p-2"><ClassBadge label={r[cls] as string} /></td>
-                          <td className="p-2 text-center"><ConfBadge label={r[conf] as string} /></td>
-                        </tr>
-                      ))}</tbody>
+                      <tbody>{data.map(r => {
+                        const ld = r[ltpKey] as number;
+                        const lp = r[ltpPct] as number;
+                        return (
+                          <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
+                            <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
+                            <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev[prevOI])}</td>
+                            <td className="p-2 text-right text-white">{fmt(r.curr[currOI])}</td>
+                            <td className="p-2 text-right"><DiffCell val={r[oiKey] as number} pct={r[oiPct] as number} /></td>
+                            <td className="p-2 text-right text-[var(--text-secondary)] border-l border-white/10">{r.prev[prevLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right text-white">{r.curr[currLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right" title={premBehaviour(ld).label}><DiffCell val={ld} /></td>
+                            <td className="p-2 text-right" style={{ color: ld > 0 ? "#10b981" : ld < 0 ? "#ef4444" : "#64748b" }}>{fmtPct(lp)}</td>
+                            <td className="p-2 border-l border-white/10"><PremBadge ltpDiff={ld} /></td>
+                            <td className="p-2"><ClassBadge label={r[cls] as string} /></td>
+                            <td className="p-2 text-center"><ConfBadge label={r[conf] as string} /></td>
+                          </tr>
+                        );
+                      })}</tbody>
                     </table>
                   </div>
                 </div>
@@ -1628,11 +1686,27 @@ export default function IntradayComparisonStudio() {
 
           {/* SECTION 6: Top 10 OI Decrease */}
           <SectionCard title="6 · Top 10 OI Decrease" icon={TrendingDown} color="#ef4444">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {[
-                { label: "CE — OI Decrease", color: "text-red-400/70", data: analysis.top10CEOIDec, oiKey: "ceOIDiff" as const, oiPct: "ceOIPct" as const, prev: "callOI" as const, curr2: "callOI" as const, cls: "ceClass" as const },
-                { label: "PE — OI Decrease", color: "text-emerald-400/70", data: analysis.top10PEOIDec, oiKey: "peOIDiff" as const, oiPct: "peOIPct" as const, prev: "putOI" as const, curr2: "putOI" as const, cls: "peClass" as const },
-              ].map(({ label, color, data, oiKey, oiPct, prev, curr2, cls }) => (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {([
+                {
+                  label: "CE — OI Decrease", color: "text-red-400/70",
+                  data: analysis.top10CEOIDec.filter(r => r.ceOIDiff < 0),
+                  oiKey: "ceOIDiff" as const, oiPct: "ceOIPct" as const,
+                  prevOI: "callOI" as const, currOI: "callOI" as const,
+                  ltpKey: "ceLTPDiff" as const, ltpPct: "ceLTPPct" as const,
+                  prevLTP: "callLTP" as const, currLTP: "callLTP" as const,
+                  cls: "ceClass" as const,
+                },
+                {
+                  label: "PE — OI Decrease", color: "text-emerald-400/70",
+                  data: analysis.top10PEOIDec.filter(r => r.peOIDiff < 0),
+                  oiKey: "peOIDiff" as const, oiPct: "peOIPct" as const,
+                  prevOI: "putOI" as const, currOI: "putOI" as const,
+                  ltpKey: "peLTPDiff" as const, ltpPct: "peLTPPct" as const,
+                  prevLTP: "putLTP" as const, currLTP: "putLTP" as const,
+                  cls: "peClass" as const,
+                },
+              ] as const).map(({ label, color, data, oiKey, oiPct, prevOI, currOI, ltpKey, ltpPct, prevLTP, currLTP, cls }) => (
                 <div key={label}>
                   <p className={`text-xs font-bold ${color} uppercase tracking-wider mb-3`}>{label}</p>
                   <div className="overflow-x-auto">
@@ -1641,18 +1715,32 @@ export default function IntradayComparisonStudio() {
                         <th className="p-2 text-left">Strike</th>
                         <th className="p-2 text-right">Prev OI</th>
                         <th className="p-2 text-right">Curr OI</th>
-                        <th className="p-2 text-right">Diff</th>
+                        <th className="p-2 text-right">OI Diff</th>
+                        <th className="p-2 text-right border-l border-white/10">Prev LTP</th>
+                        <th className="p-2 text-right">Curr LTP</th>
+                        <th className="p-2 text-right">LTP Diff</th>
+                        <th className="p-2 text-right">LTP %</th>
+                        <th className="p-2 text-left border-l border-white/10">Premium</th>
                         <th className="p-2 text-left">Interpretation</th>
                       </tr></thead>
-                      <tbody>{data.filter(r => (r[oiKey] as number) < 0).map(r => (
-                        <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                          <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                          <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev[prev])}</td>
-                          <td className="p-2 text-right text-white">{fmt(r.curr[curr2])}</td>
-                          <td className="p-2 text-right"><DiffCell val={r[oiKey] as number} pct={r[oiPct] as number} /></td>
-                          <td className="p-2"><ClassBadge label={r[cls] as string} /></td>
-                        </tr>
-                      ))}</tbody>
+                      <tbody>{data.map(r => {
+                        const ld = r[ltpKey] as number;
+                        const lp = r[ltpPct] as number;
+                        return (
+                          <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
+                            <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
+                            <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev[prevOI])}</td>
+                            <td className="p-2 text-right text-white">{fmt(r.curr[currOI])}</td>
+                            <td className="p-2 text-right"><DiffCell val={r[oiKey] as number} pct={r[oiPct] as number} /></td>
+                            <td className="p-2 text-right text-[var(--text-secondary)] border-l border-white/10">{r.prev[prevLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right text-white">{r.curr[currLTP].toFixed(2)}</td>
+                            <td className="p-2 text-right" title={premBehaviour(ld).label}><DiffCell val={ld} /></td>
+                            <td className="p-2 text-right" style={{ color: ld > 0 ? "#10b981" : ld < 0 ? "#ef4444" : "#64748b" }}>{fmtPct(lp)}</td>
+                            <td className="p-2 border-l border-white/10"><PremBadge ltpDiff={ld} /></td>
+                            <td className="p-2"><ClassBadge label={r[cls] as string} /></td>
+                          </tr>
+                        );
+                      })}</tbody>
                     </table>
                   </div>
                 </div>
