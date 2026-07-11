@@ -520,8 +520,7 @@ export default function IntradayComparisonStudio() {
     // Top 10 volume
     const top10CEVolInc = sorted(diffRows, "ceVolDiff").slice(0, 10);
     const top10PEVolInc = sorted(diffRows, "peVolDiff").slice(0, 10);
-    const top10CEVolDec = sorted(diffRows, "ceVolDiff", false).slice(0, 10);
-    const top10PEVolDec = sorted(diffRows, "peVolDiff", false).slice(0, 10);
+
 
     // Top 10 OI
     const top10CEOIInc = sorted(diffRows, "ceOIDiff").slice(0, 10);
@@ -587,7 +586,7 @@ export default function IntradayComparisonStudio() {
     return {
       diffRows, bias, biasConf, pcrTrend, pcrChange, spotDiff, atmShift,
       totalCEOIDiff, totalPEOIDiff, totalCEAdded, totalPEAdded,
-      top10CEVolInc, top10PEVolInc, top10CEVolDec, top10PEVolDec,
+      top10CEVolInc, top10PEVolInc,
       top10CEOIInc, top10PEOIInc, top10CEOIDec, top10PEOIDec,
       top10CEPremInc, top10PEPremInc, top10CEPremDec, top10PEPremDec,
       freshCEWrite, freshPEWrite, callBuying, putBuying, longUnwind, shortCover,
@@ -1587,54 +1586,7 @@ export default function IntradayComparisonStudio() {
                   </table>
                 </div>
               </div>
-              {/* CE Volume Decrease */}
-              <div>
-                <p className="text-xs font-bold text-red-400/60 uppercase tracking-wider mb-3">CE — Volume Decrease</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/10 text-[var(--text-secondary)]">
-                      <th className="p-2 text-left">Strike</th>
-                      <th className="p-2 text-right">Prev Vol</th>
-                      <th className="p-2 text-right">Curr Vol</th>
-                      <th className="p-2 text-right">Diff</th>
-                      <th className="p-2 text-right">%</th>
-                    </tr></thead>
-                    <tbody>{analysis.top10CEVolDec.filter(r => r.ceVolDiff < 0).map(r => (
-                      <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                        <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                        <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev.callVol)}</td>
-                        <td className="p-2 text-right text-red-300/60">{fmt(r.curr.callVol)}</td>
-                        <td className="p-2 text-right"><DiffCell val={r.ceVolDiff} /></td>
-                        <td className="p-2 text-right text-red-400/60">{fmtPct(r.ceVolPct)}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </div>
-              {/* PE Volume Decrease */}
-              <div>
-                <p className="text-xs font-bold text-emerald-400/60 uppercase tracking-wider mb-3">PE — Volume Decrease</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/10 text-[var(--text-secondary)]">
-                      <th className="p-2 text-left">Strike</th>
-                      <th className="p-2 text-right">Prev Vol</th>
-                      <th className="p-2 text-right">Curr Vol</th>
-                      <th className="p-2 text-right">Diff</th>
-                      <th className="p-2 text-right">%</th>
-                    </tr></thead>
-                    <tbody>{analysis.top10PEVolDec.filter(r => r.peVolDiff < 0).map(r => (
-                      <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3">
-                        <td className="p-2 font-bold text-white">{fmt(r.strike)}</td>
-                        <td className="p-2 text-right text-[var(--text-secondary)]">{fmt(r.prev.putVol)}</td>
-                        <td className="p-2 text-right text-emerald-300/60">{fmt(r.curr.putVol)}</td>
-                        <td className="p-2 text-right"><DiffCell val={r.peVolDiff} /></td>
-                        <td className="p-2 text-right text-emerald-400/60">{fmtPct(r.peVolPct)}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </div>
+
             </div>
           </SectionCard>
 
