@@ -112,6 +112,12 @@ export default function OptionAnalyzer() {
   const [previousUpload, setPreviousUpload] = useState<{timestamp: string, dataset: Dataset} | null>(null);
   const [currentUpload, setCurrentUpload] = useState<{timestamp: string, dataset: Dataset} | null>(null);
 
+  // Ref to always hold the latest currentUpload value for use inside async callbacks
+  const currentUploadRef = useRef<{timestamp: string, dataset: Dataset} | null>(null);
+  useEffect(() => {
+    currentUploadRef.current = currentUpload;
+  }, [currentUpload]);
+
   // --- Parsing & Data Management ---
 
   const parseNumber = (val: any) => {
@@ -243,25 +249,40 @@ export default function OptionAnalyzer() {
     else if (!compareDatasetId) setCompareDatasetId(newDataset.id);
 
     // Intraday Comparison Cache Integration
-    fetch(`/api/cache?symbol=${symbol}&t=${Date.now()}`, { cache: 'no-store' })
-      .then(res => res.json())
-      .then(data => {
-        if (data.data) {
-          setPreviousUpload(data.data);
-        } else {
+    const curr = { timestamp: new Date().toISOString(), dataset: newDataset };
+    const prevInSession = currentUploadRef.current;
+
+    if (prevInSession && prevInSession.dataset.symbol === symbol) {
+      // ✅ Same session, same symbol — use in-memory previous upload for instant comparison
+      setPreviousUpload(prevInSession);
+      setCurrentUpload(curr);
+      // Persist new upload to cache for cross-session use next time
+      fetch('/api/cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, dataset: newDataset, timestamp: curr.timestamp })
+      }).catch(err => console.error("Cache write error", err));
+    } else {
+      // 🔄 Fresh session or different symbol — check persistent cache for cross-session comparison
+      fetch(`/api/cache?symbol=${symbol}&t=${Date.now()}`, { cache: 'no-store' })
+        .then(res => res.json())
+        .then(data => {
+          setPreviousUpload(data.data || null);
+          setCurrentUpload(curr);
+          // Persist current upload to cache
+          return fetch('/api/cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol, dataset: newDataset, timestamp: curr.timestamp })
+          });
+        })
+        .catch(err => {
+          // Even if cache fails, still set currentUpload so UI updates
+          console.error("Cache error", err);
           setPreviousUpload(null);
-        }
-        
-        const curr = { timestamp: new Date().toISOString(), dataset: newDataset };
-        setCurrentUpload(curr);
-        
-        fetch('/api/cache', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, dataset: newDataset, timestamp: curr.timestamp })
+          setCurrentUpload(curr);
         });
-      })
-      .catch(err => console.error("Cache error", err));
+    }
   };
 
   const fetchLiveNSEData = async (symbol: string = "NIFTY") => {
@@ -468,7 +489,9 @@ export default function OptionAnalyzer() {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Analytics_${activeDataset?.symbol}_${activeDataset?.expiry}.pdf`);
+      // Include timestamp so each download has a unique filename and never overwrites
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+      pdf.save(`Analytics_${activeDataset?.symbol}_${activeDataset?.expiry}_${ts}.pdf`);
       el.classList.remove("exporting");
     });
   };

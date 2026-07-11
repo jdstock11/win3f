@@ -5,9 +5,10 @@ import OptionAnalyzer from "@/components/OptionAnalyzer";
 import MarketActivityScanner from "@/components/MarketActivityScanner";
 import WeeklyIntelligenceDashboard from "@/modules/weekly-intelligence/dashboard";
 import RolloverAnalyzer from "@/components/RolloverAnalyzer";
+import IntradayComparisonStudio from "@/components/IntradayComparisonStudio";
 
 export default function Home() {
-  const [activeWorkflow, setActiveWorkflow] = useState<"institutional" | "market-activity" | "weekly-intelligence" | "rollover">("institutional");
+  const [activeWorkflow, setActiveWorkflow] = useState<"institutional" | "market-activity" | "weekly-intelligence" | "rollover" | "intraday-studio">("institutional");
 
   return (
     <main style={{ padding: "2rem", maxWidth: "1600px", margin: "0 auto" }}>
@@ -61,6 +62,16 @@ export default function Home() {
           >
             Rollover Analysis
           </button>
+          <button
+            onClick={() => setActiveWorkflow("intraday-studio")}
+            className={`px-8 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${
+              activeWorkflow === "intraday-studio"
+                ? "bg-gradient-to-r from-[#ec4899] to-[#8b5cf6] text-white shadow-lg shadow-purple-500/20"
+                : "bg-[#161925]/50 text-[var(--text-secondary)] hover:text-white border border-[var(--border-color)]"
+            }`}
+          >
+            Intraday Comparison Studio
+          </button>
         </div>
       </header>
       
@@ -68,6 +79,7 @@ export default function Home() {
       {activeWorkflow === "market-activity" && <MarketActivityScanner />}
       {activeWorkflow === "weekly-intelligence" && <WeeklyIntelligenceDashboard />}
       {activeWorkflow === "rollover" && <RolloverAnalyzer />}
+      {activeWorkflow === "intraday-studio" && <IntradayComparisonStudio />}
     </main>
   );
 }
