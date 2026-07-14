@@ -1752,7 +1752,7 @@ export default function IntradayComparisonStudio() {
                     <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px" }}>The selected datasets appear to be identical or contain zero shifts across all tracked strikes.</p>
                   </div>
                 ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
                     {/* ── CARD 1: Intraday Positioning Shift ───────────────── */}
                     <div style={{
                       background: "linear-gradient(135deg,rgba(139,92,246,0.08),rgba(109,40,217,0.04))",
@@ -1811,79 +1811,119 @@ export default function IntradayComparisonStudio() {
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                      {/* ── CARD 2: Current Market Positioning ───────────────── */}
-                      <div style={{
-                        background: "linear-gradient(135deg,rgba(16,185,129,0.08),rgba(5,150,105,0.04))",
-                        border: "1px solid rgba(16,185,129,0.25)",
-                        borderRadius: "16px", padding: "22px",
-                        boxShadow: "0 4px 32px rgba(16,185,129,0.08)",
-                        display: "flex", flexDirection: "column", gap: "0px",
-                      }}>
-                        {/* Card 2 Header */}
-                        <div style={{ marginBottom: "16px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 8px #10b981", flexShrink: 0 }} />
-                            <p style={{ fontSize: "13px", fontWeight: 800, color: "#6ee7b7", margin: 0, letterSpacing: "0.02em" }}>
-                              CURRENT MARKET POSITIONING
-                            </p>
-                          </div>
-                          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
-                            Current Dataset · OI-Weighted Snapshot ({currFile.time})
+                    {/* ── CARD 2: Previous Market Positioning ───────────────── */}
+                    <div style={{
+                      background: "linear-gradient(135deg,rgba(249,115,22,0.08),rgba(194,65,12,0.04))",
+                      border: "1px solid rgba(249,115,22,0.25)",
+                      borderRadius: "16px", padding: "22px",
+                      boxShadow: "0 4px 32px rgba(249,115,22,0.08)",
+                      display: "flex", flexDirection: "column", gap: "0px",
+                    }}>
+                      {/* Card 2 Header */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#f97316", boxShadow: "0 0 8px #f97316", flexShrink: 0 }} />
+                          <p style={{ fontSize: "13px", fontWeight: 800, color: "#fdba74", margin: 0, letterSpacing: "0.02em" }}>
+                            PREVIOUS MARKET POSITIONING
                           </p>
                         </div>
-
-                        {/* Dominant Row */}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
-                          <DominantBadge label={d2_ceLabel} pct={d2_ce[d2_ceDom[0]]} color={colorOf(d2_ceDom[0])} />
-                          <DominantBadge label={d2_peLabel} pct={d2_pe[d2_peDom[0]]} color={colorOf(d2_peDom[0])} />
-                        </div>
-
-                        {/* Bars */}
-                        <PositioningBar data={d2_ce} type="CE" label="📞 CALLS" />
-                        <PositioningBar data={d2_pe} type="PE" label="📤 PUTS" />
-
-                        {/* Validation note */}
-                        <div style={{
-                          background: "rgba(255,255,255,0.03)", borderRadius: "10px",
-                          padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
-                          marginTop: "4px",
-                        }}>
-                          <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Engine Validation</p>
-                          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                            {[
-                              { label: "Same Logic as Inst. Terminal", ok: true },
-                              { label: "OI-Weighted", ok: true },
-                              { label: "Current Snapshot", ok: true },
-                            ].map(({ label, ok }) => (
-                              <span key={label} style={{
-                                fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
-                                background: "rgba(16,185,129,0.12)", color: "#6ee7b7",
-                                border: "1px solid rgba(16,185,129,0.2)",
-                              }}>✓ {label}</span>
-                            ))}
-                          </div>
-                        </div>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
+                          Previous Dataset · OI-Weighted Snapshot
+                        </p>
                       </div>
 
-                      {/* ── CARD 3: Position Flow Summary ───────────────── */}
+                      {/* Dominant Row */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
+                        <DominantBadge
+                          label={`${Object.entries(d1_cePrev).sort((a,b)=>b[1]-a[1])[0][0] === "writing" ? "Call" : Object.entries(d1_cePrev).sort((a,b)=>b[1]-a[1])[0][0] === "buying" ? "Call" : "CE"} ${domLabels[Object.entries(d1_cePrev).sort((a,b)=>b[1]-a[1])[0][0]]}`}
+                          pct={Object.entries(d1_cePrev).sort((a,b)=>b[1]-a[1])[0][1]}
+                          color={colorOf(Object.entries(d1_cePrev).sort((a,b)=>b[1]-a[1])[0][0])}
+                        />
+                        <DominantBadge
+                          label={`${Object.entries(d1_pePrev).sort((a,b)=>b[1]-a[1])[0][0] === "writing" ? "Put" : Object.entries(d1_pePrev).sort((a,b)=>b[1]-a[1])[0][0] === "buying" ? "Put" : "PE"} ${domLabels[Object.entries(d1_pePrev).sort((a,b)=>b[1]-a[1])[0][0]]}`}
+                          pct={Object.entries(d1_pePrev).sort((a,b)=>b[1]-a[1])[0][1]}
+                          color={colorOf(Object.entries(d1_pePrev).sort((a,b)=>b[1]-a[1])[0][0])}
+                        />
+                      </div>
+
+                      {/* Bars */}
+                      <PositioningBar data={d1_cePrev} type="CE" label="📞 CALLS" />
+                      <PositioningBar data={d1_pePrev} type="PE" label="📤 PUTS" />
+
+                      {/* Validation note */}
                       <div style={{
-                        background: "linear-gradient(135deg,rgba(59,130,246,0.08),rgba(37,99,235,0.04))",
-                        border: "1px solid rgba(59,130,246,0.25)",
-                        borderRadius: "16px", padding: "22px",
-                        boxShadow: "0 4px 32px rgba(59,130,246,0.08)",
+                        background: "rgba(255,255,255,0.03)", borderRadius: "10px",
+                        padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
+                        marginTop: "4px",
                       }}>
-                        <div style={{ marginBottom: "16px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", boxShadow: "0 0 8px #3b82f6", flexShrink: 0 }} />
-                            <p style={{ fontSize: "13px", fontWeight: 800, color: "#93c5fd", margin: 0, letterSpacing: "0.02em" }}>
-                              POSITION FLOW SUMMARY
-                            </p>
-                          </div>
+                        <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Snapshot Info</p>
+                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                          {[
+                            { label: "Same Logic as Inst. Terminal" },
+                            { label: "OI-Weighted" },
+                            { label: "Previous Snapshot" },
+                          ].map(({ label }) => (
+                            <span key={label} style={{
+                              fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
+                              background: "rgba(249,115,22,0.12)", color: "#fdba74",
+                              border: "1px solid rgba(249,115,22,0.2)",
+                            }}>✓ {label}</span>
+                          ))}
                         </div>
-                        <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.8)", lineHeight: "1.6", margin: 0 }}>
-                          {flowSummary}
+                      </div>
+                    </div>
+
+                    {/* ── CARD 3: Current Market Positioning ───────────────── */}
+                    <div style={{
+                      background: "linear-gradient(135deg,rgba(16,185,129,0.08),rgba(5,150,105,0.04))",
+                      border: "1px solid rgba(16,185,129,0.25)",
+                      borderRadius: "16px", padding: "22px",
+                      boxShadow: "0 4px 32px rgba(16,185,129,0.08)",
+                      display: "flex", flexDirection: "column", gap: "0px",
+                    }}>
+                      {/* Card 3 Header */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 8px #10b981", flexShrink: 0 }} />
+                          <p style={{ fontSize: "13px", fontWeight: 800, color: "#6ee7b7", margin: 0, letterSpacing: "0.02em" }}>
+                            CURRENT MARKET POSITIONING
+                          </p>
+                        </div>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
+                          Current Dataset · OI-Weighted Snapshot ({currFile.time})
                         </p>
+                      </div>
+
+                      {/* Dominant Row */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
+                        <DominantBadge label={d2_ceLabel} pct={d2_ce[d2_ceDom[0]]} color={colorOf(d2_ceDom[0])} />
+                        <DominantBadge label={d2_peLabel} pct={d2_pe[d2_peDom[0]]} color={colorOf(d2_peDom[0])} />
+                      </div>
+
+                      {/* Bars */}
+                      <PositioningBar data={d2_ce} type="CE" label="📞 CALLS" />
+                      <PositioningBar data={d2_pe} type="PE" label="📤 PUTS" />
+
+                      {/* Validation note */}
+                      <div style={{
+                        background: "rgba(255,255,255,0.03)", borderRadius: "10px",
+                        padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
+                        marginTop: "4px",
+                      }}>
+                        <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Engine Validation</p>
+                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                          {[
+                            { label: "Same Logic as Inst. Terminal" },
+                            { label: "OI-Weighted" },
+                            { label: "Current Snapshot" },
+                          ].map(({ label }) => (
+                            <span key={label} style={{
+                              fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
+                              background: "rgba(16,185,129,0.12)", color: "#6ee7b7",
+                              border: "1px solid rgba(16,185,129,0.2)",
+                            }}>✓ {label}</span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
