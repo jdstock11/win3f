@@ -1501,8 +1501,6 @@ export default function IntradayComparisonStudio() {
           {/* SECTION 1: Executive Summary */}
           <SectionCard title="1 · Executive Summary" icon={FileText} color="#8b5cf6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <StatCard label="Previous Time" value={prevFile.time} color="#3b82f6" />
-              <StatCard label="Current Time" value={currFile.time} color="#8b5cf6" />
               <StatCard label="Underlying" value={currFile.underlying} color="white" />
               <StatCard label="Expiry" value={currFile.expiry} color="#f59e0b" />
               <StatCard label="Spot Change" value={<DiffCell val={analysis.spotDiff} />} color="white" />
