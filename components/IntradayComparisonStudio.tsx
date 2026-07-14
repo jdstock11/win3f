@@ -1658,8 +1658,8 @@ export default function IntradayComparisonStudio() {
               : key === "unwinding" ? "Long Unwinding %"
               : "Short Covering %";
 
-            const PositioningBar = ({ data, type, label }: { data: typeof d2_ce; type: "CE" | "PE"; label: string }) => {
-              const keys: (keyof typeof d2_ce)[] = ["writing", "buying", "unwinding", "covering"];
+            const PositioningBar = ({ data, type, label, isShift }: { data: Record<string, number>; type: "CE" | "PE"; label: string; isShift?: boolean }) => {
+              const keys = ["writing", "buying", "unwinding", "covering"];
               const dom = keys.reduce((a, b) => data[a] > data[b] ? a : b);
               return (
                 <div style={{ marginBottom: "16px" }}>
@@ -1667,19 +1667,23 @@ export default function IntradayComparisonStudio() {
                   {keys.map(k => {
                     const val = data[k];
                     const col = colorOf(k);
-                    const isDom = k === dom;
+                    const isDom = k === dom && (!isShift || val > 0);
+                    const barWidth = isShift ? Math.min(Math.abs(val), 100) : val;
+
                     return (
                       <div key={k} style={{ marginBottom: "8px" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "3px" }}>
                           <span style={{ fontSize: "11px", color: isDom ? col : "rgba(255,255,255,0.55)", fontWeight: isDom ? 700 : 400 }}>
                             {labelOf(k, type)}
                           </span>
-                          <span style={{ fontSize: "12px", fontWeight: 800, color: col }}>{val.toFixed(1)}%</span>
+                          <span style={{ fontSize: "12px", fontWeight: 800, color: col }}>
+                            {isShift && val > 0 ? "+" : ""}{val.toFixed(1)}%
+                          </span>
                         </div>
                         <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
                           <div style={{
                             height: "100%",
-                            width: `${val}%`,
+                            width: `${barWidth}%`,
                             background: isDom
                               ? `linear-gradient(90deg, ${col}, ${col}cc)`
                               : `${col}55`,
@@ -1691,27 +1695,6 @@ export default function IntradayComparisonStudio() {
                       </div>
                     );
                   })}
-                </div>
-              );
-            };
-
-            const ShiftBar = ({ prev, curr, shift, keyName, type }: { prev: number, curr: number, shift: number, keyName: string, type: "CE" | "PE" }) => {
-              const col = shift > 0 ? "#10b981" : shift < 0 ? "#ef4444" : "#64748b";
-              const dir = shift > 0 ? "↑" : shift < 0 ? "↓" : "–";
-              const trend = shift > 0 ? "Strengthening" : shift < 0 ? "Weakening" : "Unchanged";
-              const title = labelOf(keyName, type);
-              
-              return (
-                <div style={{ marginBottom: "12px", background: "rgba(255,255,255,0.02)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 700, color: colorOf(keyName) }}>{title}</span>
-                    <span style={{ fontSize: "14px", fontWeight: 800, color: col }}>{shift > 0 ? "+" : ""}{shift.toFixed(1)}% {dir}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "rgba(255,255,255,0.45)", fontWeight: 500 }}>
-                    <span style={{flex: 1}}>Prev <strong style={{color:"white"}}>{prev.toFixed(1)}%</strong></span>
-                    <span style={{flex: 1, textAlign: "center"}}>Curr <strong style={{color:"white"}}>{curr.toFixed(1)}%</strong></span>
-                    <span style={{flex: 1, textAlign: "right", color: col}}>{trend}</span>
-                  </div>
                 </div>
               );
             };
@@ -1799,20 +1782,10 @@ export default function IntradayComparisonStudio() {
                       </div>
 
                       {/* Bars for CE */}
-                      <div style={{ marginBottom: "16px" }}>
-                        <p style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>📞 CALL POSITION SHIFT</p>
-                        {(["writing", "buying", "unwinding", "covering"] as const).map(k => (
-                          <ShiftBar key={k} prev={d1_cePrev[k]} curr={d2_ce[k]} shift={d1_ceShift[k]} keyName={k} type="CE" />
-                        ))}
-                      </div>
+                      <PositioningBar data={d1_ceShift} type="CE" label="📞 CALL POSITION SHIFT" isShift />
 
                       {/* Bars for PE */}
-                      <div style={{ marginBottom: "16px" }}>
-                        <p style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>📤 PUT POSITION SHIFT</p>
-                        {(["writing", "buying", "unwinding", "covering"] as const).map(k => (
-                          <ShiftBar key={k} prev={d1_pePrev[k]} curr={d2_pe[k]} shift={d1_peShift[k]} keyName={k} type="PE" />
-                        ))}
-                      </div>
+                      <PositioningBar data={d1_peShift} type="PE" label="📤 PUT POSITION SHIFT" isShift />
 
                       {/* Confidence Breakdown */}
                       <div style={{
