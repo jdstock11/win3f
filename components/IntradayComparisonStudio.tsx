@@ -2185,78 +2185,41 @@ export default function IntradayComparisonStudio() {
                   <thead className="bg-[#161925] border-b border-white/10">
                     <tr>
                       <th className="p-2 text-left text-[var(--text-secondary)] sticky left-0 bg-[#161925] z-10">Strike</th>
-                      <th className="p-2 text-center text-red-400" colSpan={9}>CALL</th>
-                      <th className="p-2 text-center text-emerald-400" colSpan={9}>PUT</th>
+                      <th className="p-2 text-center text-red-400" colSpan={6}>CALL</th>
+                      <th className="p-2 text-center text-emerald-400" colSpan={6}>PUT</th>
                     </tr>
                     <tr className="border-t border-white/5">
                       <th className="p-2 sticky left-0 bg-[#161925] z-10"></th>
                       <th className="p-2 text-[var(--text-secondary)]">Prev OI</th>
                       <th className="p-2 text-[var(--text-secondary)]">Curr OI</th>
                       <th className="p-2 text-[var(--text-secondary)]">OI Δ</th>
-                      <th className="p-2 text-[var(--text-secondary)]">Prev LTP</th>
                       <th className="p-2 text-[var(--text-secondary)]">Curr LTP</th>
-                      <th className="p-2 text-[var(--text-secondary)]">LTP Δ</th>
-                      <th className="p-2 text-[var(--text-secondary)]">LTP %</th>
                       <th className="p-2 text-[var(--text-secondary)]">Vol Δ</th>
                       <th className="p-2 text-[var(--text-secondary)]">Classification</th>
                       <th className="p-2 text-[var(--text-secondary)]">Prev OI</th>
                       <th className="p-2 text-[var(--text-secondary)]">Curr OI</th>
                       <th className="p-2 text-[var(--text-secondary)]">OI Δ</th>
-                      <th className="p-2 text-[var(--text-secondary)]">Prev LTP</th>
                       <th className="p-2 text-[var(--text-secondary)]">Curr LTP</th>
-                      <th className="p-2 text-[var(--text-secondary)]">LTP Δ</th>
-                      <th className="p-2 text-[var(--text-secondary)]">LTP %</th>
                       <th className="p-2 text-[var(--text-secondary)]">Vol Δ</th>
                       <th className="p-2 text-[var(--text-secondary)]">Classification</th>
                     </tr>
                   </thead>
                   <tbody>
                     {analysis.diffRows.map(r => {
-                      const ceLTPPct = r.prev.callLTP ? (r.ceLTPDiff / r.prev.callLTP) * 100 : 0;
-                      const peLTPPct = r.prev.putLTP ? (r.peLTPDiff / r.prev.putLTP) * 100 : 0;
-
-                      const getBadge = (val: number) => {
-                        if (val > 0) return <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-400 whitespace-nowrap ml-2">Premium Expansion</span>;
-                        if (val < 0) return <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-400/20 text-red-400 whitespace-nowrap ml-2">Premium Decay</span>;
-                        return <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-400/20 text-gray-400 whitespace-nowrap ml-2">No Change</span>;
-                      };
-                      const getColor = (val: number) => val > 0 ? "text-emerald-400" : val < 0 ? "text-red-400" : "text-gray-400";
-                      const formatPct = (val: number) => (val > 0 ? "+" : "") + val.toFixed(1) + "%";
-
                       return (
                         <tr key={r.strike} className="border-b border-white/5 hover:bg-white/3 transition-colors">
                           <td className="p-2 font-bold text-white sticky left-0 bg-[#0f111a] border-r border-white/5 z-10">{fmt(r.strike)}</td>
                           <td className="p-2 text-right text-red-400/50">{fmt(r.prev.callOI)}</td>
                           <td className="p-2 text-right text-red-300">{fmt(r.curr.callOI)}</td>
                           <td className="p-2 text-right"><DiffCell val={r.ceOIDiff} /></td>
-                          <td className="p-2 text-right text-[var(--text-secondary)]">{r.prev.callLTP.toFixed(2)}</td>
                           <td className="p-2 text-right text-white">{r.curr.callLTP.toFixed(2)}</td>
-                          <td className="p-2 text-right" title={`Previous Premium: ${r.prev.callLTP.toFixed(2)}\nCurrent Premium: ${r.curr.callLTP.toFixed(2)}\nAbsolute Change: ${r.ceLTPDiff > 0 ? '+' : ''}${r.ceLTPDiff.toFixed(2)}\nPercentage Change: ${formatPct(ceLTPPct)}`}>
-                            <div className="flex items-center justify-end">
-                              <span className={getColor(r.ceLTPDiff)}>{r.ceLTPDiff > 0 ? "+" : ""}{r.ceLTPDiff.toFixed(2)}</span>
-                              {getBadge(r.ceLTPDiff)}
-                            </div>
-                          </td>
-                          <td className="p-2 text-right" title={`Previous Premium: ${r.prev.callLTP.toFixed(2)}\nCurrent Premium: ${r.curr.callLTP.toFixed(2)}\nAbsolute Change: ${r.ceLTPDiff > 0 ? '+' : ''}${r.ceLTPDiff.toFixed(2)}\nPercentage Change: ${formatPct(ceLTPPct)}`}>
-                            <span className={getColor(r.ceLTPDiff)}>{formatPct(ceLTPPct)}</span>
-                          </td>
                           <td className="p-2 text-right"><DiffCell val={r.ceVolDiff} /></td>
                           <td className="p-2"><ClassBadge label={r.ceClass} /></td>
                           
                           <td className="p-2 text-right text-emerald-400/50">{fmt(r.prev.putOI)}</td>
                           <td className="p-2 text-right text-emerald-300">{fmt(r.curr.putOI)}</td>
                           <td className="p-2 text-right"><DiffCell val={r.peOIDiff} /></td>
-                          <td className="p-2 text-right text-[var(--text-secondary)]">{r.prev.putLTP.toFixed(2)}</td>
                           <td className="p-2 text-right text-white">{r.curr.putLTP.toFixed(2)}</td>
-                          <td className="p-2 text-right" title={`Previous Premium: ${r.prev.putLTP.toFixed(2)}\nCurrent Premium: ${r.curr.putLTP.toFixed(2)}\nAbsolute Change: ${r.peLTPDiff > 0 ? '+' : ''}${r.peLTPDiff.toFixed(2)}\nPercentage Change: ${formatPct(peLTPPct)}`}>
-                            <div className="flex items-center justify-end">
-                              <span className={getColor(r.peLTPDiff)}>{r.peLTPDiff > 0 ? "+" : ""}{r.peLTPDiff.toFixed(2)}</span>
-                              {getBadge(r.peLTPDiff)}
-                            </div>
-                          </td>
-                          <td className="p-2 text-right" title={`Previous Premium: ${r.prev.putLTP.toFixed(2)}\nCurrent Premium: ${r.curr.putLTP.toFixed(2)}\nAbsolute Change: ${r.peLTPDiff > 0 ? '+' : ''}${r.peLTPDiff.toFixed(2)}\nPercentage Change: ${formatPct(peLTPPct)}`}>
-                            <span className={getColor(r.peLTPDiff)}>{formatPct(peLTPPct)}</span>
-                          </td>
                           <td className="p-2 text-right"><DiffCell val={r.peVolDiff} /></td>
                           <td className="p-2"><ClassBadge label={r.peClass} /></td>
                         </tr>
