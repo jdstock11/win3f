@@ -11,6 +11,8 @@ import {
   PieChart
 } from "lucide-react";
 
+import { generateInstitutionalData } from "./institutional-analytics";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18,12 +20,18 @@ import {
 interface OptionRow {
   strike: number;
   callOI: number;
+  callOIChange?: number;
   callVol: number;
   callLTP: number;
+  callLtpRaw?: string;
+  callLTPChange?: number;
   callIV: number;
   putOI: number;
+  putOIChange?: number;
   putVol: number;
   putLTP: number;
+  putLtpRaw?: string;
+  putLTPChange?: number;
   putIV: number;
 }
 
@@ -145,13 +153,19 @@ const parseOptionChainCSV = (text: string, fileName: string): ParsedFile => {
     const row: OptionRow = {
       strike,
       callOI: pn(r[1]),
+      callOIChange: pn(r[2]),
       callVol: pn(r[3]),
-      callLTP: pn(r[5]),
       callIV: pn(r[4]),
-      putOI: pn(r[21]),
-      putVol: pn(r[19]),
+      callLTP: pn(r[5]),
+      callLtpRaw: r[5] != null ? String(r[5]).trim() : "0",
+      callLTPChange: pn(r[6]),
+      putLTPChange: pn(r[16]),
       putLTP: pn(r[17]),
+      putLtpRaw: r[17] != null ? String(r[17]).trim() : "0",
       putIV: pn(r[18]),
+      putVol: pn(r[19]),
+      putOIChange: pn(r[20]),
+      putOI: pn(r[21]),
     };
     optionRows.push(row);
     totalCEOI += row.callOI;
@@ -1589,55 +1603,20 @@ export default function IntradayComparisonStudio() {
             const d1_ceLabel = `${d1_ceDom[0] === "writing" ? "Call" : d1_ceDom[0] === "buying" ? "Call" : d1_ceDom[0] === "unwinding" ? "CE" : "CE"} ${domLabels[d1_ceDom[0]]}`;
             const d1_peLabel = `${d1_peDom[0] === "writing" ? "Put" : d1_peDom[0] === "buying" ? "Put" : d1_peDom[0] === "unwinding" ? "PE" : "PE"} ${domLabels[d1_peDom[0]]}`;
 
-            // ── Card 2 Data: Current snapshot, same engine as Institutional Terminal ──
-            // Classification logic mirrors IntradayInstitutionalComparisonEngine exactly.
-            // Weight by CURRENT file's absolute OI (curr.callOI / curr.putOI).
-            let d2_ceFreshWrite = 0, d2_ceBuy = 0, d2_ceLongUnwind = 0, d2_ceShortCover = 0;
-            let d2_peFreshWrite = 0, d2_peBuy = 0, d2_peLongUnwind = 0, d2_peShortCover = 0;
-
-            analysis.diffRows.forEach(r => {
-              // ── CE classification (same as Institutional Terminal) ──
-              let ceClass2 = "Neutral";
-              if (r.ceOIDiff > 0 && r.ceLTPDiff < 0)  ceClass2 = "Fresh Call Writing";
-              else if (r.ceOIDiff > 0 && r.ceLTPDiff > 0)  ceClass2 = "Call Buying";
-              else if (r.ceOIDiff < 0 && r.ceLTPDiff > 0)  ceClass2 = "Short Covering";
-              else if (r.ceOIDiff < 0 && r.ceLTPDiff < 0)  ceClass2 = "Long Unwinding";
-
-              // Weight by current OI (current snapshot size)
-              const ceW = r.curr.callOI;
-              if (ceClass2 === "Fresh Call Writing") d2_ceFreshWrite += ceW;
-              else if (ceClass2 === "Call Buying")   d2_ceBuy       += ceW;
-              else if (ceClass2 === "Long Unwinding") d2_ceLongUnwind += ceW;
-              else if (ceClass2 === "Short Covering") d2_ceShortCover += ceW;
-
-              // ── PE classification (same as Institutional Terminal) ──
-              let peClass2 = "Neutral";
-              if (r.peOIDiff > 0 && r.peLTPDiff < 0)  peClass2 = "Fresh Put Writing";
-              else if (r.peOIDiff > 0 && r.peLTPDiff > 0)  peClass2 = "Put Buying";
-              else if (r.peOIDiff < 0 && r.peLTPDiff > 0)  peClass2 = "Short Covering";
-              else if (r.peOIDiff < 0 && r.peLTPDiff < 0)  peClass2 = "Long Unwinding";
-
-              const peW = r.curr.putOI;
-              if (peClass2 === "Fresh Put Writing")  d2_peFreshWrite  += peW;
-              else if (peClass2 === "Put Buying")    d2_peBuy        += peW;
-              else if (peClass2 === "Long Unwinding") d2_peLongUnwind  += peW;
-              else if (peClass2 === "Short Covering") d2_peShortCover  += peW;
-            });
-
-            const d2_ceTotal = d2_ceFreshWrite + d2_ceBuy + d2_ceLongUnwind + d2_ceShortCover || 1;
-            const d2_peTotal = d2_peFreshWrite + d2_peBuy + d2_peLongUnwind + d2_peShortCover || 1;
-
+            // ── Card 2 Data: Current snapshot, MUST USE SAME ENGINE as Institutional Terminal ──
+            const instData = generateInstitutionalData(currFile.rows);
+            
             const d2_ce = {
-              writing:  +(d2_ceFreshWrite  / d2_ceTotal * 100).toFixed(1),
-              buying:   +(d2_ceBuy         / d2_ceTotal * 100).toFixed(1),
-              unwinding:+(d2_ceLongUnwind  / d2_ceTotal * 100).toFixed(1),
-              covering: +(d2_ceShortCover  / d2_ceTotal * 100).toFixed(1),
+              writing:  +(instData.positioning.calls.writing).toFixed(1),
+              buying:   +(instData.positioning.calls.buying).toFixed(1),
+              unwinding:+(instData.positioning.calls.unwinding).toFixed(1),
+              covering: +(instData.positioning.calls.covering).toFixed(1),
             };
             const d2_pe = {
-              writing:  +(d2_peFreshWrite  / d2_peTotal * 100).toFixed(1),
-              buying:   +(d2_peBuy         / d2_peTotal * 100).toFixed(1),
-              unwinding:+(d2_peLongUnwind  / d2_peTotal * 100).toFixed(1),
-              covering: +(d2_peShortCover  / d2_peTotal * 100).toFixed(1),
+              writing:  +(instData.positioning.puts.writing).toFixed(1),
+              buying:   +(instData.positioning.puts.buying).toFixed(1),
+              unwinding:+(instData.positioning.puts.unwinding).toFixed(1),
+              covering: +(instData.positioning.puts.covering).toFixed(1),
             };
 
             const d2_ceDom = Object.entries(d2_ce).sort((a, b) => b[1] - a[1])[0];
