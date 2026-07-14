@@ -1541,43 +1541,76 @@ export default function IntradayComparisonStudio() {
               Card 2: Current snapshot (using same engine as Institutional Terminal)
           ══════════════════════════════════════════════════════════════════════ */}
           {(() => {
-            // ── Card 1 Data: ONLY uses difference data ─────────────────────
-            // Classify each strike using OI-diff and LTP-diff (same classifyStrike fn)
-            // then weight contribution by the ABSOLUTE OI-diff magnitude
-            let d1_ceFreshWrite = 0, d1_ceBuy = 0, d1_ceLongUnwind = 0, d1_ceShortCover = 0;
-            let d1_peFreshWrite = 0, d1_peBuy = 0, d1_peLongUnwind = 0, d1_peShortCover = 0;
-
-            analysis.diffRows.forEach(r => {
-              const ceAbs = Math.abs(r.ceOIDiff);
-              if (r.ceClass === "Fresh Call Writing") d1_ceFreshWrite += ceAbs;
-              else if (r.ceClass === "Long Build-up")  d1_ceBuy       += ceAbs;
-              else if (r.ceClass === "Long Unwinding") d1_ceLongUnwind += ceAbs;
-              else if (r.ceClass === "Short Covering") d1_ceShortCover += ceAbs;
-
-              const peAbs = Math.abs(r.peOIDiff);
-              if (r.peClass === "Fresh Put Writing")  d1_peFreshWrite  += peAbs;
-              else if (r.peClass === "Short Build-up") d1_peBuy        += peAbs;
-              else if (r.peClass === "Long Unwinding") d1_peLongUnwind  += peAbs;
-              else if (r.peClass === "Short Covering") d1_peShortCover  += peAbs;
-            });
-
-            const d1_ceTotal = d1_ceFreshWrite + d1_ceBuy + d1_ceLongUnwind + d1_ceShortCover || 1;
-            const d1_peTotal = d1_peFreshWrite + d1_peBuy + d1_peLongUnwind + d1_peShortCover || 1;
-
-            const d1_ce = {
-              writing:  +(d1_ceFreshWrite  / d1_ceTotal * 100).toFixed(1),
-              buying:   +(d1_ceBuy         / d1_ceTotal * 100).toFixed(1),
-              unwinding:+(d1_ceLongUnwind  / d1_ceTotal * 100).toFixed(1),
-              covering: +(d1_ceShortCover  / d1_ceTotal * 100).toFixed(1),
+            // ── Card 1 & Card 2 Data: MUST USE SAME ENGINE as Institutional Terminal ──
+            const instDataPrev = generateInstitutionalData(prevFile.rows);
+            const instDataCurr = generateInstitutionalData(currFile.rows);
+            
+            // Current Snapshot
+            const d2_ce = {
+              writing:  +(instDataCurr.positioning.calls.writing).toFixed(1),
+              buying:   +(instDataCurr.positioning.calls.buying).toFixed(1),
+              unwinding:+(instDataCurr.positioning.calls.unwinding).toFixed(1),
+              covering: +(instDataCurr.positioning.calls.covering).toFixed(1),
             };
-            const d1_pe = {
-              writing:  +(d1_peFreshWrite  / d1_peTotal * 100).toFixed(1),
-              buying:   +(d1_peBuy         / d1_peTotal * 100).toFixed(1),
-              unwinding:+(d1_peLongUnwind  / d1_peTotal * 100).toFixed(1),
-              covering: +(d1_peShortCover  / d1_peTotal * 100).toFixed(1),
+            const d2_pe = {
+              writing:  +(instDataCurr.positioning.puts.writing).toFixed(1),
+              buying:   +(instDataCurr.positioning.puts.buying).toFixed(1),
+              unwinding:+(instDataCurr.positioning.puts.unwinding).toFixed(1),
+              covering: +(instDataCurr.positioning.puts.covering).toFixed(1),
             };
 
-            // Confidence for Card 1 — based on OI diff magnitude, vol diff, LTP confirmation
+            // Previous Snapshot
+            const d1_cePrev = {
+              writing:  +(instDataPrev.positioning.calls.writing).toFixed(1),
+              buying:   +(instDataPrev.positioning.calls.buying).toFixed(1),
+              unwinding:+(instDataPrev.positioning.calls.unwinding).toFixed(1),
+              covering: +(instDataPrev.positioning.calls.covering).toFixed(1),
+            };
+            const d1_pePrev = {
+              writing:  +(instDataPrev.positioning.puts.writing).toFixed(1),
+              buying:   +(instDataPrev.positioning.puts.buying).toFixed(1),
+              unwinding:+(instDataPrev.positioning.puts.unwinding).toFixed(1),
+              covering: +(instDataPrev.positioning.puts.covering).toFixed(1),
+            };
+
+            // Shift Calculation (Current - Previous)
+            const d1_ceShift = {
+              writing: +(d2_ce.writing - d1_cePrev.writing).toFixed(1),
+              buying: +(d2_ce.buying - d1_cePrev.buying).toFixed(1),
+              unwinding: +(d2_ce.unwinding - d1_cePrev.unwinding).toFixed(1),
+              covering: +(d2_ce.covering - d1_cePrev.covering).toFixed(1),
+            };
+            const d1_peShift = {
+              writing: +(d2_pe.writing - d1_pePrev.writing).toFixed(1),
+              buying: +(d2_pe.buying - d1_pePrev.buying).toFixed(1),
+              unwinding: +(d2_pe.unwinding - d1_pePrev.unwinding).toFixed(1),
+              covering: +(d2_pe.covering - d1_pePrev.covering).toFixed(1),
+            };
+
+            const isIdentical = Object.values(d1_ceShift).every(v => v === 0) && Object.values(d1_peShift).every(v => v === 0);
+
+            // Dominant for Card 1 (Largest Positive Shift)
+            const ceShiftEntries = Object.entries(d1_ceShift) as [keyof typeof d1_ceShift, number][];
+            const peShiftEntries = Object.entries(d1_peShift) as [keyof typeof d1_peShift, number][];
+            
+            const d1_ceDom = ceShiftEntries.reduce((max, curr) => curr[1] > max[1] ? curr : max, ceShiftEntries[0]);
+            const d1_peDom = peShiftEntries.reduce((max, curr) => curr[1] > max[1] ? curr : max, peShiftEntries[0]);
+
+            const domLabels: Record<string, string> = {
+              writing:   "Fresh Writing",
+              buying:    "Buying",
+              unwinding: "Long Unwinding",
+              covering:  "Short Covering",
+            };
+            const d1_ceLabel = `${d1_ceDom[0] === "writing" ? "Call" : d1_ceDom[0] === "buying" ? "Call" : d1_ceDom[0] === "unwinding" ? "CE" : "CE"} ${domLabels[d1_ceDom[0]]}`;
+            const d1_peLabel = `${d1_peDom[0] === "writing" ? "Put" : d1_peDom[0] === "buying" ? "Put" : d1_peDom[0] === "unwinding" ? "PE" : "PE"} ${domLabels[d1_peDom[0]]}`;
+
+            const d2_ceDom = Object.entries(d2_ce).sort((a, b) => b[1] - a[1])[0] as [keyof typeof d2_ce, number];
+            const d2_peDom = Object.entries(d2_pe).sort((a, b) => b[1] - a[1])[0] as [keyof typeof d2_pe, number];
+            const d2_ceLabel = `${d2_ceDom[0] === "writing" ? "Call" : d2_ceDom[0] === "buying" ? "Call" : "CE"} ${domLabels[d2_ceDom[0]]}`;
+            const d2_peLabel = `${d2_peDom[0] === "writing" ? "Put" : d2_peDom[0] === "buying" ? "Put" : "PE"} ${domLabels[d2_peDom[0]]}`;
+
+            // Confidence for Card 1
             const totalAbsOIDiff = analysis.diffRows.reduce((a, r) => a + Math.abs(r.ceOIDiff) + Math.abs(r.peOIDiff), 0);
             const totalAbsVolDiff = analysis.diffRows.reduce((a, r) => a + Math.abs(r.ceVolDiff) + Math.abs(r.peVolDiff), 0);
             const ltpConfirmed = analysis.diffRows.filter(r =>
@@ -1591,50 +1624,26 @@ export default function IntradayComparisonStudio() {
               ? "Medium"
               : "Low";
 
-            // Dominant for Card 1
-            const d1_ceDom = Object.entries(d1_ce).sort((a, b) => b[1] - a[1])[0];
-            const d1_peDom = Object.entries(d1_pe).sort((a, b) => b[1] - a[1])[0];
-            const domLabels: Record<string, string> = {
-              writing:   "Fresh Writing",
-              buying:    "Buying",
-              unwinding: "Long Unwinding",
-              covering:  "Short Covering",
+            // ── Text Summaries ──────────────────────────────────
+            const getShiftDesc = (val: number, name: string) => {
+              if (val > 10) return `${name} increased sharply by ${val.toFixed(0)}%`;
+              if (val > 2) return `${name} increased by ${val.toFixed(0)}%`;
+              if (val < -10) return `${name} reduced sharply by ${Math.abs(val).toFixed(0)}%`;
+              if (val < -2) return `${name} reduced by ${Math.abs(val).toFixed(0)}%`;
+              return `${name} unchanged`;
             };
-            const d1_ceLabel = `${d1_ceDom[0] === "writing" ? "Call" : d1_ceDom[0] === "buying" ? "Call" : d1_ceDom[0] === "unwinding" ? "CE" : "CE"} ${domLabels[d1_ceDom[0]]}`;
-            const d1_peLabel = `${d1_peDom[0] === "writing" ? "Put" : d1_peDom[0] === "buying" ? "Put" : d1_peDom[0] === "unwinding" ? "PE" : "PE"} ${domLabels[d1_peDom[0]]}`;
+            const flowSummary = [
+              getShiftDesc(d1_ceShift.writing, "Institutional CE Writing"),
+              getShiftDesc(d1_ceShift.buying, "Aggressive Call Buying"),
+              getShiftDesc(d1_peShift.writing, "PE Writing"),
+              getShiftDesc(d1_peShift.buying, "Put Buying"),
+              getShiftDesc(d1_ceShift.covering, "Short Covering")
+            ].join(". ") + ".";
 
-            // ── Card 2 Data: Current snapshot, MUST USE SAME ENGINE as Institutional Terminal ──
-            const instData = generateInstitutionalData(currFile.rows);
+            const netCeBullish = d1_ceShift.buying - d1_ceShift.writing;
+            const netPeBullish = d1_peShift.writing - d1_peShift.buying;
             
-            const d2_ce = {
-              writing:  +(instData.positioning.calls.writing).toFixed(1),
-              buying:   +(instData.positioning.calls.buying).toFixed(1),
-              unwinding:+(instData.positioning.calls.unwinding).toFixed(1),
-              covering: +(instData.positioning.calls.covering).toFixed(1),
-            };
-            const d2_pe = {
-              writing:  +(instData.positioning.puts.writing).toFixed(1),
-              buying:   +(instData.positioning.puts.buying).toFixed(1),
-              unwinding:+(instData.positioning.puts.unwinding).toFixed(1),
-              covering: +(instData.positioning.puts.covering).toFixed(1),
-            };
-
-            const d2_ceDom = Object.entries(d2_ce).sort((a, b) => b[1] - a[1])[0];
-            const d2_peDom = Object.entries(d2_pe).sort((a, b) => b[1] - a[1])[0];
-            const d2_ceLabel = `${d2_ceDom[0] === "writing" ? "Call" : d2_ceDom[0] === "buying" ? "Call" : "CE"} ${domLabels[d2_ceDom[0]]}`;
-            const d2_peLabel = `${d2_peDom[0] === "writing" ? "Put" : d2_peDom[0] === "buying" ? "Put" : "PE"} ${domLabels[d2_peDom[0]]}`;
-
-            // ── AI Interpretation strings ──────────────────────────────────
-            const d1_ceTop = Object.entries(d1_ce).sort((a, b) => b[1] - a[1])[0];
-            const d1_peTop = Object.entries(d1_pe).sort((a, b) => b[1] - a[1])[0];
-            const labelMap: Record<string, string> = {
-              writing:   "Fresh Writing",
-              buying:    "Buying",
-              unwinding: "Long Unwinding",
-              covering:  "Short Covering",
-            };
-            const shiftSummary = `${d1_ceTop[0] === "writing" ? "Fresh Call Writing" : d1_ceTop[0] === "buying" ? "Call Buying" : d1_ceTop[0] === "unwinding" ? "Call Long Unwinding" : "Call Short Covering"} accelerated from ${prevFile.time} to ${currFile.time} across ${d1_ceTop[1].toFixed(0)}% of analysed strikes (by OI weight). Put side led by ${d1_peTop[0] === "writing" ? "Fresh Put Writing" : d1_peTop[0] === "buying" ? "Put Buying" : d1_peTop[0] === "unwinding" ? "Put Long Unwinding" : "Put Short Covering"} at ${d1_peTop[1].toFixed(0)}%.`;
-            const currentSummary = `Current option chain shows ${d2_ce.writing.toFixed(0)}% Call Writing and ${d2_pe.writing.toFixed(0)}% Put Writing — ${d2_ce.writing > d2_pe.writing ? "resistance remains stronger than support" : d2_pe.writing > d2_ce.writing ? "support is being built more aggressively than resistance" : "balanced institutional positioning"}. Dominant call position: ${d2_ceLabel} (${d2_ce[d2_ceDom[0] as keyof typeof d2_ce]}%). Dominant put position: ${d2_peLabel} (${d2_pe[d2_peDom[0] as keyof typeof d2_pe]}%).`;
+            const currentSummary = `Current option chain shows ${d2_ce.writing.toFixed(0)}% Call Writing and ${d2_pe.writing.toFixed(0)}% Put Writing — ${d2_ce.writing > d2_pe.writing ? "resistance remains stronger than support" : d2_pe.writing > d2_ce.writing ? "support is being built more aggressively than resistance" : "balanced institutional positioning"}. Dominant call position: ${d2_ceLabel} (${d2_ce[d2_ceDom[0]]}%). Dominant put position: ${d2_peLabel} (${d2_pe[d2_peDom[0]]}%).`;
 
             // ── Mini bar component (inline) ────────────────────────────────
             const colorOf = (key: string) =>
@@ -1649,12 +1658,8 @@ export default function IntradayComparisonStudio() {
               : key === "unwinding" ? "Long Unwinding %"
               : "Short Covering %";
 
-            const confColor = d1_conf === "High" ? "#10b981" : d1_conf === "Medium" ? "#f59e0b" : "#64748b";
-
-            type PosRecord = { writing: number; buying: number; unwinding: number; covering: number };
-
-            const PositioningBar = ({ data, type, label }: { data: PosRecord; type: "CE" | "PE"; label: string }) => {
-              const keys: (keyof PosRecord)[] = ["writing", "buying", "unwinding", "covering"];
+            const PositioningBar = ({ data, type, label }: { data: typeof d2_ce; type: "CE" | "PE"; label: string }) => {
+              const keys: (keyof typeof d2_ce)[] = ["writing", "buying", "unwinding", "covering"];
               const dom = keys.reduce((a, b) => data[a] > data[b] ? a : b);
               return (
                 <div style={{ marginBottom: "16px" }}>
@@ -1690,6 +1695,27 @@ export default function IntradayComparisonStudio() {
               );
             };
 
+            const ShiftBar = ({ prev, curr, shift, keyName, type }: { prev: number, curr: number, shift: number, keyName: string, type: "CE" | "PE" }) => {
+              const col = shift > 0 ? "#10b981" : shift < 0 ? "#ef4444" : "#64748b";
+              const dir = shift > 0 ? "↑" : shift < 0 ? "↓" : "–";
+              const trend = shift > 0 ? "Strengthening" : shift < 0 ? "Weakening" : "Unchanged";
+              const title = labelOf(keyName, type);
+              
+              return (
+                <div style={{ marginBottom: "12px", background: "rgba(255,255,255,0.02)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 700, color: colorOf(keyName) }}>{title}</span>
+                    <span style={{ fontSize: "14px", fontWeight: 800, color: col }}>{shift > 0 ? "+" : ""}{shift.toFixed(1)}% {dir}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "rgba(255,255,255,0.45)", fontWeight: 500 }}>
+                    <span style={{flex: 1}}>Prev <strong style={{color:"white"}}>{prev.toFixed(1)}%</strong></span>
+                    <span style={{flex: 1, textAlign: "center"}}>Curr <strong style={{color:"white"}}>{curr.toFixed(1)}%</strong></span>
+                    <span style={{flex: 1, textAlign: "right", color: col}}>{trend}</span>
+                  </div>
+                </div>
+              );
+            };
+
             const DominantBadge = ({ label, pct, color }: { label: string; pct: number; color: string }) => (
               <div style={{
                 display: "inline-flex", alignItems: "center", gap: "8px",
@@ -1701,7 +1727,7 @@ export default function IntradayComparisonStudio() {
                 <span style={{
                   fontSize: "11px", fontWeight: 800, color: "#fff",
                   background: `${color}30`, borderRadius: "6px", padding: "1px 7px",
-                }}>{pct.toFixed(0)}%</span>
+                }}>{pct > 0 ? "+" : ""}{pct.toFixed(1)}%</span>
               </div>
             );
 
@@ -1737,148 +1763,218 @@ export default function IntradayComparisonStudio() {
                   </div>
                 </div>
 
-                {/* Two Cards */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-
-                  {/* ── CARD 1: Intraday Positioning Shift ───────────────── */}
-                  <div style={{
-                    background: "linear-gradient(135deg,rgba(139,92,246,0.08),rgba(109,40,217,0.04))",
-                    border: "1px solid rgba(139,92,246,0.25)",
-                    borderRadius: "16px", padding: "22px",
-                    boxShadow: "0 4px 32px rgba(139,92,246,0.08)",
-                    display: "flex", flexDirection: "column", gap: "0px",
-                  }}>
-                    {/* Card 1 Header */}
-                    <div style={{ marginBottom: "16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#8b5cf6", boxShadow: "0 0 8px #8b5cf6", flexShrink: 0 }} />
-                        <p style={{ fontSize: "13px", fontWeight: 800, color: "#c4b5fd", margin: 0, letterSpacing: "0.02em" }}>
-                          INTRADAY POSITIONING SHIFT
+                {isIdentical ? (
+                  <div style={{ padding: "40px 20px", textAlign: "center", background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <h4 style={{ color: "#c4b5fd", fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>No Institutional Position Change Detected</h4>
+                    <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px" }}>The selected datasets appear to be identical or contain zero shifts across all tracked strikes.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    {/* ── CARD 1: Intraday Positioning Shift ───────────────── */}
+                    <div style={{
+                      background: "linear-gradient(135deg,rgba(139,92,246,0.08),rgba(109,40,217,0.04))",
+                      border: "1px solid rgba(139,92,246,0.25)",
+                      borderRadius: "16px", padding: "22px",
+                      boxShadow: "0 4px 32px rgba(139,92,246,0.08)",
+                      display: "flex", flexDirection: "column", gap: "0px",
+                    }}>
+                      {/* Card 1 Header */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#8b5cf6", boxShadow: "0 0 8px #8b5cf6", flexShrink: 0 }} />
+                          <p style={{ fontSize: "13px", fontWeight: 800, color: "#c4b5fd", margin: 0, letterSpacing: "0.02em" }}>
+                            INTRADAY POSITIONING SHIFT
+                          </p>
+                        </div>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
+                          Compared with Previous Snapshot · Difference Analysis
                         </p>
                       </div>
-                      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
-                        Compared with Previous Snapshot · Difference Analysis
-                      </p>
-                    </div>
 
-                    {/* Confidence + Dominant Row */}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
-                      <ConfidenceChip level={d1_conf} />
-                      <DominantBadge label={d1_ceLabel} pct={d1_ce[d1_ceDom[0] as keyof typeof d1_ce]} color={colorOf(d1_ceDom[0])} />
-                      <DominantBadge label={d1_peLabel} pct={d1_pe[d1_peDom[0] as keyof typeof d1_pe]} color={colorOf(d1_peDom[0])} />
-                    </div>
+                      {/* Confidence + Dominant Row */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
+                        <ConfidenceChip level={d1_conf} />
+                        <DominantBadge label={d1_ceLabel} pct={d1_ceDom[1]} color={colorOf(d1_ceDom[0])} />
+                        <DominantBadge label={d1_peLabel} pct={d1_peDom[1]} color={colorOf(d1_peDom[0])} />
+                      </div>
 
-                    {/* Bars */}
-                    <PositioningBar data={d1_ce} type="CE" label="📞 Call Position Shift" />
-                    <PositioningBar data={d1_pe} type="PE" label="📤 Put Position Shift" />
-
-                    {/* Confidence Breakdown */}
-                    <div style={{
-                      background: "rgba(255,255,255,0.03)", borderRadius: "10px",
-                      padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
-                      marginTop: "4px",
-                    }}>
-                      <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Confidence Basis</p>
-                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                        {[
-                          { label: "OI Diff", ok: totalAbsOIDiff > 500000 },
-                          { label: "Vol Diff", ok: totalAbsVolDiff > 100000 },
-                          { label: "LTP Confirm", ok: ltpRatio > 0.3 },
-                        ].map(({ label, ok }) => (
-                          <span key={label} style={{
-                            fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
-                            background: ok ? "rgba(16,185,129,0.12)" : "rgba(100,116,139,0.12)",
-                            color: ok ? "#6ee7b7" : "#64748b",
-                            border: `1px solid ${ok ? "rgba(16,185,129,0.2)" : "rgba(100,116,139,0.2)"}`,
-                          }}>{ok ? "✓" : "–"} {label}</span>
+                      {/* Bars for CE */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <p style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>📞 CALL POSITION SHIFT</p>
+                        {(["writing", "buying", "unwinding", "covering"] as const).map(k => (
+                          <ShiftBar key={k} prev={d1_cePrev[k]} curr={d2_ce[k]} shift={d1_ceShift[k]} keyName={k} type="CE" />
                         ))}
                       </div>
-                    </div>
-                  </div>
 
-                  {/* ── CARD 2: Current Market Positioning ───────────────── */}
-                  <div style={{
-                    background: "linear-gradient(135deg,rgba(16,185,129,0.08),rgba(5,150,105,0.04))",
-                    border: "1px solid rgba(16,185,129,0.25)",
-                    borderRadius: "16px", padding: "22px",
-                    boxShadow: "0 4px 32px rgba(16,185,129,0.08)",
-                    display: "flex", flexDirection: "column", gap: "0px",
-                  }}>
-                    {/* Card 2 Header */}
-                    <div style={{ marginBottom: "16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 8px #10b981", flexShrink: 0 }} />
-                        <p style={{ fontSize: "13px", fontWeight: 800, color: "#6ee7b7", margin: 0, letterSpacing: "0.02em" }}>
-                          CURRENT MARKET POSITIONING
+                      {/* Bars for PE */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <p style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>📤 PUT POSITION SHIFT</p>
+                        {(["writing", "buying", "unwinding", "covering"] as const).map(k => (
+                          <ShiftBar key={k} prev={d1_pePrev[k]} curr={d2_pe[k]} shift={d1_peShift[k]} keyName={k} type="PE" />
+                        ))}
+                      </div>
+
+                      {/* Confidence Breakdown */}
+                      <div style={{
+                        background: "rgba(255,255,255,0.03)", borderRadius: "10px",
+                        padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
+                        marginTop: "4px",
+                      }}>
+                        <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Confidence Basis</p>
+                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                          {[
+                            { label: "OI Diff", ok: totalAbsOIDiff > 500000 },
+                            { label: "Vol Diff", ok: totalAbsVolDiff > 100000 },
+                            { label: "LTP Confirm", ok: ltpRatio > 0.3 },
+                          ].map(({ label, ok }) => (
+                            <span key={label} style={{
+                              fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
+                              background: ok ? "rgba(16,185,129,0.12)" : "rgba(100,116,139,0.12)",
+                              color: ok ? "#6ee7b7" : "#64748b",
+                              border: `1px solid ${ok ? "rgba(16,185,129,0.2)" : "rgba(100,116,139,0.2)"}`,
+                            }}>{ok ? "✓" : "–"} {label}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      {/* ── CARD 2: Current Market Positioning ───────────────── */}
+                      <div style={{
+                        background: "linear-gradient(135deg,rgba(16,185,129,0.08),rgba(5,150,105,0.04))",
+                        border: "1px solid rgba(16,185,129,0.25)",
+                        borderRadius: "16px", padding: "22px",
+                        boxShadow: "0 4px 32px rgba(16,185,129,0.08)",
+                        display: "flex", flexDirection: "column", gap: "0px",
+                      }}>
+                        {/* Card 2 Header */}
+                        <div style={{ marginBottom: "16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 8px #10b981", flexShrink: 0 }} />
+                            <p style={{ fontSize: "13px", fontWeight: 800, color: "#6ee7b7", margin: 0, letterSpacing: "0.02em" }}>
+                              CURRENT MARKET POSITIONING
+                            </p>
+                          </div>
+                          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
+                            Current Dataset · OI-Weighted Snapshot ({currFile.time})
+                          </p>
+                        </div>
+
+                        {/* Dominant Row */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
+                          <DominantBadge label={d2_ceLabel} pct={d2_ce[d2_ceDom[0]]} color={colorOf(d2_ceDom[0])} />
+                          <DominantBadge label={d2_peLabel} pct={d2_pe[d2_peDom[0]]} color={colorOf(d2_peDom[0])} />
+                        </div>
+
+                        {/* Bars */}
+                        <PositioningBar data={d2_ce} type="CE" label="📞 CALLS" />
+                        <PositioningBar data={d2_pe} type="PE" label="📤 PUTS" />
+
+                        {/* Validation note */}
+                        <div style={{
+                          background: "rgba(255,255,255,0.03)", borderRadius: "10px",
+                          padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
+                          marginTop: "4px",
+                        }}>
+                          <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Engine Validation</p>
+                          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                            {[
+                              { label: "Same Logic as Inst. Terminal", ok: true },
+                              { label: "OI-Weighted", ok: true },
+                              { label: "Current Snapshot", ok: true },
+                            ].map(({ label, ok }) => (
+                              <span key={label} style={{
+                                fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
+                                background: "rgba(16,185,129,0.12)", color: "#6ee7b7",
+                                border: "1px solid rgba(16,185,129,0.2)",
+                              }}>✓ {label}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── CARD 3: Position Flow Summary ───────────────── */}
+                      <div style={{
+                        background: "linear-gradient(135deg,rgba(59,130,246,0.08),rgba(37,99,235,0.04))",
+                        border: "1px solid rgba(59,130,246,0.25)",
+                        borderRadius: "16px", padding: "22px",
+                        boxShadow: "0 4px 32px rgba(59,130,246,0.08)",
+                      }}>
+                        <div style={{ marginBottom: "16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", boxShadow: "0 0 8px #3b82f6", flexShrink: 0 }} />
+                            <p style={{ fontSize: "13px", fontWeight: 800, color: "#93c5fd", margin: 0, letterSpacing: "0.02em" }}>
+                              POSITION FLOW SUMMARY
+                            </p>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.8)", lineHeight: "1.6", margin: 0 }}>
+                          {flowSummary}
                         </p>
                       </div>
-                      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0, marginLeft: "16px" }}>
-                        Current Dataset · OI-Weighted Snapshot ({currFile.time})
-                      </p>
                     </div>
+                  </div>
+                )}
 
-                    {/* Dominant Row */}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
-                      <DominantBadge label={d2_ceLabel} pct={d2_ce[d2_ceDom[0] as keyof typeof d2_ce]} color={colorOf(d2_ceDom[0])} />
-                      <DominantBadge label={d2_peLabel} pct={d2_pe[d2_peDom[0] as keyof typeof d2_pe]} color={colorOf(d2_peDom[0])} />
-                    </div>
-
-                    {/* Bars */}
-                    <PositioningBar data={d2_ce} type="CE" label="📞 CALLS" />
-                    <PositioningBar data={d2_pe} type="PE" label="📤 PUTS" />
-
-                    {/* Validation note */}
+                {/* ── AI Interpretation & Net Institutional Shift ──────────────────────────────────── */}
+                {!isIdentical && (
+                  <div style={{
+                    marginTop: "16px",
+                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px",
+                  }}>
                     <div style={{
-                      background: "rgba(255,255,255,0.03)", borderRadius: "10px",
-                      padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)",
-                      marginTop: "4px",
+                      background: "rgba(139,92,246,0.06)", borderRadius: "12px",
+                      padding: "14px 16px", border: "1px solid rgba(139,92,246,0.15)",
                     }}>
-                      <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Engine Validation</p>
-                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                        {[
-                          { label: "Same Logic as Inst. Terminal", ok: true },
-                          { label: "OI-Weighted", ok: true },
-                          { label: "Current Snapshot", ok: true },
-                        ].map(({ label, ok }) => (
-                          <span key={label} style={{
-                            fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "6px",
-                            background: "rgba(16,185,129,0.12)", color: "#6ee7b7",
-                            border: "1px solid rgba(16,185,129,0.2)",
-                          }}>✓ {label}</span>
-                        ))}
+                      <p style={{ fontSize: "10px", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "12px" }}>
+                        🧠 Net Institutional Shift
+                      </p>
+                      <div style={{ marginBottom: "12px" }}>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", marginBottom: "4px" }}>CALL SIDE</p>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "2px" }}>
+                          <span style={{ color: "#ef4444" }}>Writing: {d1_ceShift.writing > 0 ? "+" : ""}{d1_ceShift.writing}%</span>
+                          <span style={{ color: "#10b981" }}>Buying: {d1_ceShift.buying > 0 ? "+" : ""}{d1_ceShift.buying}%</span>
+                        </div>
+                        <p style={{ fontSize: "12px", fontWeight: 700, color: netCeBullish > 0 ? "#10b981" : netCeBullish < 0 ? "#ef4444" : "#64748b" }}>
+                          {netCeBullish > 0 ? "Net Bullish Shift" : netCeBullish < 0 ? "Net Defensive Shift" : "Neutral Shift"}
+                        </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", marginBottom: "4px" }}>PUT SIDE</p>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "2px" }}>
+                          <span style={{ color: "#ef4444" }}>Writing: {d1_peShift.writing > 0 ? "+" : ""}{d1_peShift.writing}%</span>
+                          <span style={{ color: "#10b981" }}>Buying: {d1_peShift.buying > 0 ? "+" : ""}{d1_peShift.buying}%</span>
+                        </div>
+                        <p style={{ fontSize: "12px", fontWeight: 700, color: netPeBullish > 0 ? "#10b981" : netPeBullish < 0 ? "#ef4444" : "#64748b" }}>
+                          {netPeBullish > 0 ? "Net Bullish Shift" : netPeBullish < 0 ? "Net Defensive Shift" : "Neutral Shift"}
+                        </p>
                       </div>
                     </div>
+                    <div style={{
+                      background: "rgba(59,130,246,0.06)", borderRadius: "12px",
+                      padding: "14px 16px", border: "1px solid rgba(59,130,246,0.15)",
+                    }}>
+                      <p style={{ fontSize: "10px", fontWeight: 700, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>
+                        🧠 Shift Interpretation
+                      </p>
+                      <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", lineHeight: "1.6", margin: 0 }}>
+                        The institutional positioning shifted predominantly towards {netCeBullish > 0 && netPeBullish > 0 ? "a highly bullish setup" : netCeBullish < 0 && netPeBullish < 0 ? "a highly defensive setup" : netCeBullish > 0 ? "call buying, showing bullish intent" : "put writing, indicating support creation"}. 
+                        Overall momentum changed by {Math.abs(netCeBullish + netPeBullish).toFixed(1)}% across the board.
+                      </p>
+                    </div>
+                    <div style={{
+                      background: "rgba(16,185,129,0.06)", borderRadius: "12px",
+                      padding: "14px 16px", border: "1px solid rgba(16,185,129,0.15)",
+                    }}>
+                      <p style={{ fontSize: "10px", fontWeight: 700, color: "#6ee7b7", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>
+                        🧠 Current Market
+                      </p>
+                      <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", lineHeight: "1.6", margin: 0 }}>
+                        {currentSummary}
+                      </p>
+                    </div>
                   </div>
-                </div>
-
-                {/* ── AI Interpretation ──────────────────────────────────── */}
-                <div style={{
-                  marginTop: "16px",
-                  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px",
-                }}>
-                  <div style={{
-                    background: "rgba(139,92,246,0.06)", borderRadius: "12px",
-                    padding: "14px 16px", border: "1px solid rgba(139,92,246,0.15)",
-                  }}>
-                    <p style={{ fontSize: "10px", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>
-                      🧠 Intraday Position Shift
-                    </p>
-                    <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", lineHeight: "1.6", margin: 0 }}>
-                      {shiftSummary}
-                    </p>
-                  </div>
-                  <div style={{
-                    background: "rgba(16,185,129,0.06)", borderRadius: "12px",
-                    padding: "14px 16px", border: "1px solid rgba(16,185,129,0.15)",
-                  }}>
-                    <p style={{ fontSize: "10px", fontWeight: 700, color: "#6ee7b7", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>
-                      🧠 Current Market
-                    </p>
-                    <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", lineHeight: "1.6", margin: 0 }}>
-                      {currentSummary}
-                    </p>
-                  </div>
-                </div>
+                )}
               </div>
             );
           })()}
