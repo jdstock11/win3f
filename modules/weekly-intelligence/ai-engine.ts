@@ -1,278 +1,517 @@
 import { MergedDailyData, OptionChainRow, ScoreEngineResult, TradeQuality, AiStrategy, HistoricalSimilarity } from "./types";
 import { calculatePCR, identifySmartMoney, calculateSupportResistance, analyzeOIShifts, calculateMaxPain } from "./analytics";
 
-export const computeScoreEngine = (currentChain: OptionChainRow[], previousChain?: OptionChainRow[]): ScoreEngineResult => {
-  let bullish = 0;
-  let bearish = 0;
-  let neutral = 0;
+// ─────────────────────────────────────────────────────────────────────────────
+// WEIGHTED INSTITUTIONAL SCORING MODEL
+// Weights:
+//   1. Institutional Classification  35%
+//   2. Premium Behaviour             20%
+//   3. OI Migration                  15%
+//   4. Volume Expansion              15%
+//   5. PCR Trend                     10%
+//   6. Spot Movement                  5%
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // 1. PCR Trend (Max 20)
-  const pcr = calculatePCR(currentChain);
-  let pcrComponent = { score: 20, confidence: 90, reason: "Neutral PCR suggests balanced writing." };
-  if (pcr > 1.2) {
-    bullish += 20;
-    pcrComponent = { score: 20, confidence: 95, reason: "High Put writing indicates strong support base." };
-  } else if (pcr < 0.8 && pcr > 0) {
-    bearish += 20;
-    pcrComponent = { score: 20, confidence: 95, reason: "Heavy Call writing indicates resistance pressure." };
-  } else {
-    neutral += 20;
-  }
+// Institutional classification → directional bias mapping
+const CLASSIFICATION_BIAS: Record<string, "bullish" | "bearish" | "neutral"> = {
+  "Long Build-up":      "bullish",
+  "Fresh Put Writing":  "bullish",
+  "Call Unwinding":     "bullish",   // CE Call Unwinding = bears exiting calls → bullish
+  "Fresh Call Writing": "bearish",
+  "Put Unwinding":      "bearish",   // PE Put Unwinding = bulls exiting puts → bearish
+  "Short Build-up":     "bearish",
+  "None":               "neutral",
+};
 
-  // 2. OI Build-up (Max 20)
-  const shifts = analyzeOIShifts(currentChain);
-  let bullishShifts = 0;
-  let bearishShifts = 0;
-  shifts.forEach(s => {
-    if (s.type === "Fresh Put Writing" || s.type === "Long Build-up" || s.type === "Call Unwinding") bullishShifts++;
-    if (s.type === "Fresh Call Writing" || s.type === "Short Build-up" || s.type === "Put Unwinding") bearishShifts++;
+// ── Helper: Dominant institutional bias from Top-10 OI shifts ──────────────
+const getDominantInstitutionalBias = (
+  chain: OptionChainRow[],
+  previousChain?: OptionChainRow[]
+): { bias: "bullish" | "bearish" | "neutral"; bullCount: number; bearCount: number; signals: string[] } => {
+  const shifts = analyzeOIShifts(chain);
+  const top10 = shifts.slice(0, 10);
+
+  let bullCount = 0;
+  let bearCount = 0;
+  const signals: string[] = [];
+
+  top10.forEach(s => {
+    const dir = CLASSIFICATION_BIAS[s.type] ?? "neutral";
+    if (dir === "bullish") bullCount++;
+    else if (dir === "bearish") bearCount++;
+    signals.push(s.type);
   });
-  
-  let oiComponent = { score: 10, confidence: 70, reason: "Mixed OI activity across strikes." };
-  if (bullishShifts > bearishShifts * 1.5) {
-    bullish += 20;
-    oiComponent = { score: 20, confidence: 85, reason: "Aggressive Put writing and Long build-ups detected." };
-  } else if (bearishShifts > bullishShifts * 1.5) {
-    bearish += 20;
-    oiComponent = { score: 20, confidence: 85, reason: "Aggressive Call writing and Short build-ups detected." };
-  } else {
-    neutral += 20;
-  }
 
-  // 3. Smart Money (Max 15)
-  const smart = identifySmartMoney(currentChain, previousChain);
-  let smartBullish = 0;
-  let smartBearish = 0;
+  // Smart Money flows also feed institutional layer
+  const smart = identifySmartMoney(chain, previousChain);
   smart.forEach(s => {
-    if (s.type.includes("Put Writing") || s.type.includes("Call Buying")) smartBullish++;
-    if (s.type.includes("Call Writing") || s.type.includes("Put Buying")) smartBearish++;
+    if (s.type === "Institutional Put Writing" || s.type === "Institutional Call Buying") {
+      bullCount++;
+      signals.push(s.type.replace("Institutional ", ""));
+    } else if (s.type === "Institutional Call Writing" || s.type === "Institutional Put Buying") {
+      bearCount++;
+      signals.push(s.type.replace("Institutional ", ""));
+    }
   });
-  
-  let smComponent = { score: 5, confidence: 50, reason: "No significant institutional anomalies." };
-  if (smartBullish > smartBearish) {
-    bullish += 15;
-    smComponent = { score: 15, confidence: 90, reason: "Smart money skewing heavily towards bullish flows." };
-  } else if (smartBearish > smartBullish) {
-    bearish += 15;
-    smComponent = { score: 15, confidence: 90, reason: "Smart money heavily engaged in bearish distributions." };
-  } else {
-    neutral += 15;
+
+  const bias: "bullish" | "bearish" | "neutral" =
+    bullCount > bearCount ? "bullish" : bearCount > bullCount ? "bearish" : "neutral";
+
+  return { bias, bullCount, bearCount, signals };
+};
+
+// ── Helper: Premium Behaviour score ───────────────────────────────────────
+const getPremiumBehaviourScore = (
+  chain: OptionChainRow[]
+): { bull: number; bear: number; reason: string } => {
+  let ceExpansion = 0, ceDecay = 0, peExpansion = 0, peDecay = 0;
+
+  chain.forEach(row => {
+    if (row.CE) {
+      const move = row.CE.close - row.CE.open;
+      if (move > 0) ceExpansion += move; else ceDecay += Math.abs(move);
+    }
+    if (row.PE) {
+      const move = row.PE.close - row.PE.open;
+      if (move > 0) peExpansion += move; else peDecay += Math.abs(move);
+    }
+  });
+
+  let bull = 0, bear = 0;
+  const reasons: string[] = [];
+
+  // CE premium expansion → call buyers winning → Long Build-up → bullish
+  if (ceExpansion > ceDecay) {
+    bull += ceExpansion / (ceExpansion + ceDecay + 1);
+    reasons.push("CE Premium Expansion supports Long Build-up");
+  } else if (ceDecay > ceExpansion) {
+    bear += ceDecay / (ceExpansion + ceDecay + 1);
+    reasons.push("CE Premium Decay supports Fresh Call Writing");
   }
 
-  // 4. Support (Max 10) & Resistance (Max 10)
+  // PE premium decay → put writers winning → Fresh Put Writing → bullish
+  if (peDecay > peExpansion) {
+    bull += peDecay / (peExpansion + peDecay + 1);
+    reasons.push("PE Premium Decay supports Fresh Put Writing");
+  } else if (peExpansion > peDecay) {
+    bear += peExpansion / (peExpansion + peDecay + 1);
+    reasons.push("PE Premium Expansion indicates Put Buying");
+  }
+
+  return { bull, bear, reason: reasons.join("; ") || "Balanced premium movement" };
+};
+
+// ── Helper: OI Migration score ────────────────────────────────────────────
+const getOIMigrationScore = (
+  chain: OptionChainRow[]
+): { bull: number; bear: number; reason: string } => {
+  let totalPeOIAdded = 0, totalCeOIAdded = 0;
+
+  chain.forEach(row => {
+    if (row.PE && row.PE.changeInOI > 0) totalPeOIAdded += row.PE.changeInOI;
+    if (row.CE && row.CE.changeInOI > 0) totalCeOIAdded += row.CE.changeInOI;
+  });
+
+  const total = totalPeOIAdded + totalCeOIAdded || 1;
+  const reason = `PE OI Added: ${totalPeOIAdded.toLocaleString()} | CE OI Added: ${totalCeOIAdded.toLocaleString()}`;
+  return { bull: totalPeOIAdded / total, bear: totalCeOIAdded / total, reason };
+};
+
+// ── Helper: Volume Expansion score ────────────────────────────────────────
+const getVolumeExpansionScore = (
+  chain: OptionChainRow[]
+): { bull: number; bear: number; reason: string } => {
+  let ceVol = 0, peVol = 0;
+  chain.forEach(r => { ceVol += r.CE?.volume || 0; peVol += r.PE?.volume || 0; });
+
+  const total = ceVol + peVol || 1;
+  let reason = `CE Vol: ${ceVol.toLocaleString()} | PE Vol: ${peVol.toLocaleString()}`;
+  if (peVol > ceVol * 1.2) reason += " — PE volume dominant";
+  else if (ceVol > peVol * 1.2) reason += " — CE volume dominant";
+
+  return { bull: peVol / total, bear: ceVol / total, reason };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPOSITE SCORE ENGINE — Weighted Institutional Model
+// ─────────────────────────────────────────────────────────────────────────────
+export const computeScoreEngine = (currentChain: OptionChainRow[], previousChain?: OptionChainRow[]): ScoreEngineResult => {
+
+  // ── 1. Institutional Classification (weight 35) ───────────────────────────
+  const instData = getDominantInstitutionalBias(currentChain, previousChain);
+  const instTotal = (instData.bullCount + instData.bearCount) || 1;
+  const instBull = (instData.bullCount / instTotal) * 35;
+  const instBear = (instData.bearCount / instTotal) * 35;
+  const instNeutral = 35 - instBull - instBear;
+
+  const instReason = instData.bias === "bullish"
+    ? `Dominant bullish signals: ${[...new Set(instData.signals.filter(s => CLASSIFICATION_BIAS[s] === "bullish"))].slice(0, 3).join(", ")}.`
+    : instData.bias === "bearish"
+    ? `Dominant bearish signals: ${[...new Set(instData.signals.filter(s => CLASSIFICATION_BIAS[s] === "bearish"))].slice(0, 3).join(", ")}.`
+    : "Mixed institutional signals — no clear directional dominance.";
+
+  const instConfidence = Math.min(95, 50 + (Math.abs(instData.bullCount - instData.bearCount) / instTotal) * 80);
+
+  // ── 2. Premium Behaviour (weight 20) ──────────────────────────────────────
+  const prem = getPremiumBehaviourScore(currentChain);
+  const premTotal = (prem.bull + prem.bear) || 1;
+  const premBull = (prem.bull / premTotal) * 20;
+  const premBear = (prem.bear / premTotal) * 20;
+
+  // ── 3. OI Migration (weight 15) ───────────────────────────────────────────
+  const oimig = getOIMigrationScore(currentChain);
+  // Blend with premium direction to get correct interpretation
+  const oiMigBull = oimig.bull * 15 * (prem.bull / premTotal || 0.5);
+  const oiMigBear = oimig.bear * 15 * (prem.bear / premTotal || 0.5);
+  const oiMigNeutral = Math.max(0, 15 - oiMigBull - oiMigBear);
+
+  // ── 4. Volume Expansion (weight 15) ───────────────────────────────────────
+  const vol = getVolumeExpansionScore(currentChain);
+  const volTotal = (vol.bull + vol.bear) || 1;
+  const volBull = (vol.bull / volTotal) * 15;
+  const volBear = (vol.bear / volTotal) * 15;
+
+  // ── 5. PCR Trend (weight 10) ──────────────────────────────────────────────
+  const pcr = calculatePCR(currentChain);
+  let pcrBull = 0, pcrBear = 0, pcrNeutral = 0;
+  let pcrReason = "Neutral PCR — balanced writing on both sides.";
+  let pcrConfidence = 70;
+  if (pcr > 1.2) {
+    pcrBull = 10;
+    pcrReason = `PCR ${pcr.toFixed(2)} — High put writing indicates strong support base.`;
+    pcrConfidence = 85;
+  } else if (pcr < 0.8 && pcr > 0) {
+    pcrBear = 10;
+    pcrReason = `PCR ${pcr.toFixed(2)} — Heavy call writing indicates resistance pressure.`;
+    pcrConfidence = 85;
+  } else {
+    pcrNeutral = 10;
+  }
+
+  // ── 6. Spot Movement (weight 5) ───────────────────────────────────────────
   const levels = calculateSupportResistance(currentChain);
   const support = levels.find(l => l.type === "Support" && l.method === "Max OI")?.strikePrice || 0;
   const resistance = levels.find(l => l.type === "Resistance" && l.method === "Max OI")?.strikePrice || Infinity;
-  const underlyingValue = currentChain.find(r => (r.CE?.underlyingValue || r.PE?.underlyingValue))?.CE?.underlyingValue || 0;
+  const underlyingValue =
+    currentChain.find(r => r.CE?.underlyingValue)?.CE?.underlyingValue ||
+    currentChain.find(r => r.PE?.underlyingValue)?.PE?.underlyingValue || 0;
 
-  let suppComponent = { score: 5, confidence: 60, reason: "Underlying is far from major support." };
-  let resComponent = { score: 5, confidence: 60, reason: "Underlying is far from major resistance." };
-
-  if (underlyingValue > 0 && support > 0) {
-    if (underlyingValue - support < (resistance - underlyingValue) * 0.5) {
-      bullish += 10;
-      suppComponent = { score: 10, confidence: 80, reason: "Price is hovering near major support cluster, favoring a bounce." };
+  let spotBull = 0, spotBear = 0, spotNeutral = 0;
+  let spotReason = "Spot position relative to S/R is neutral.";
+  if (underlyingValue > 0 && support > 0 && resistance !== Infinity) {
+    const distS = underlyingValue - support;
+    const distR = resistance - underlyingValue;
+    if (distS < distR * 0.4) {
+      spotBull = 5; spotReason = "Price close to support — bounce potential.";
+    } else if (distR < distS * 0.4) {
+      spotBear = 5; spotReason = "Price close to resistance — rejection potential.";
     } else {
-      neutral += 5;
+      spotNeutral = 5;
     }
-  }
-  
-  if (underlyingValue > 0 && resistance !== Infinity) {
-    if (resistance - underlyingValue < (underlyingValue - support) * 0.5) {
-      bearish += 10;
-      resComponent = { score: 10, confidence: 80, reason: "Price is approaching heavy resistance, rejection likely." };
-    } else {
-      neutral += 5;
-    }
-  }
-
-  // 5. Volume (Max 10)
-  let ceVol = 0; let peVol = 0;
-  currentChain.forEach(r => { ceVol += r.CE?.volume || 0; peVol += r.PE?.volume || 0; });
-  
-  let volComponent = { score: 10, confidence: 75, reason: "Volume is balanced between calls and puts." };
-  if (peVol > ceVol * 1.2) {
-    bullish += 10;
-    volComponent = { score: 10, confidence: 85, reason: "Put volume dominance suggests downside protection writing." };
-  } else if (ceVol > peVol * 1.2) {
-    bearish += 10;
-    volComponent = { score: 10, confidence: 85, reason: "Call volume dominance suggests speculative upside capping." };
   } else {
-    neutral += 10;
+    spotNeutral = 5;
   }
 
-  // 6. Historical & 7. Market Structure
-  bullish += 10; neutral += 15;
-  const histComponent = { score: 15, confidence: 70, reason: "Historical match leans slightly neutral-bullish." };
-  const mktComponent = { score: 10, confidence: 60, reason: "General market structure indicates standard volatility drift." };
+  // ── Composite Totals ──────────────────────────────────────────────────────
+  let bullishTotal = Math.round(instBull + premBull + oiMigBull + volBull + pcrBull + spotBull);
+  let bearishTotal = Math.round(instBear + premBear + oiMigBear + volBear + pcrBear + spotBear);
+  let neutralTotal = Math.round(instNeutral + (20 - premBull - premBear) + oiMigNeutral + (15 - volBull - volBear) + pcrNeutral + spotNeutral);
 
-  const totalScore = Math.max(bullish, bearish, neutral);
+  // ── VALIDATION LAYER ──────────────────────────────────────────────────────
+  // Market Bias MUST always be consistent with dominant institutional flow.
+  // If composite score contradicts institutional classification → override.
+  if (instData.bias === "bullish" && bearishTotal >= bullishTotal) {
+    const gap = bearishTotal - bullishTotal + 1;
+    bullishTotal += gap;
+    bearishTotal -= gap;
+  } else if (instData.bias === "bearish" && bullishTotal >= bearishTotal) {
+    const gap = bullishTotal - bearishTotal + 1;
+    bearishTotal += gap;
+    bullishTotal -= gap;
+  }
+
+  // ── Quality Rating ────────────────────────────────────────────────────────
+  const topScore = Math.max(bullishTotal, bearishTotal, neutralTotal);
   let quality: TradeQuality = "Weak";
-  if (totalScore >= 75) quality = "Excellent";
-  else if (totalScore >= 60) quality = "Good";
-  else if (totalScore >= 45) quality = "Average";
+  if (topScore >= 75) quality = "Excellent";
+  else if (topScore >= 60) quality = "Good";
+  else if (topScore >= 45) quality = "Average";
 
   return {
-    pcr: pcrComponent,
-    oi: oiComponent,
-    smartMoney: smComponent,
-    support: suppComponent,
-    resistance: resComponent,
-    volume: volComponent,
-    historical: histComponent,
-    marketStructure: mktComponent,
-    bullishTotal: bullish,
-    bearishTotal: bearish,
-    neutralTotal: neutral,
+    pcr: { score: Math.round(pcrBull + pcrBear || pcrNeutral), confidence: pcrConfidence, reason: pcrReason },
+    oi:  { score: Math.max(1, Math.round(instBull + instBear > 0 ? Math.max(instBull, instBear) : instNeutral)), confidence: Math.round(instConfidence), reason: instReason },
+    smartMoney: {
+      score: Math.max(1, Math.round(Math.max(instBull, instBear))),
+      confidence: Math.min(95, Math.round(50 + (Math.abs(instData.bullCount - instData.bearCount) / instTotal) * 100)),
+      reason: instData.signals.length > 0
+        ? `Smart Money flow: ${[...new Set(instData.signals)].slice(0, 4).join(", ")}.`
+        : "No significant institutional anomalies detected."
+    },
+    support: {
+      score: support > 0 ? Math.round(spotBull + 5) : 5,
+      confidence: underlyingValue > 0 && support > 0 ? 75 : 50,
+      reason: spotReason
+    },
+    resistance: {
+      score: resistance !== Infinity ? Math.round(spotBear + 5) : 5,
+      confidence: underlyingValue > 0 && resistance !== Infinity ? 75 : 50,
+      reason: `Major resistance at ${resistance !== Infinity ? resistance : "N/A"}. Price-to-resistance gap evaluated.`
+    },
+    volume: {
+      score: 10,
+      confidence: 80,
+      reason: vol.reason
+    },
+    historical: { score: 15, confidence: 70, reason: "Historical match leans slightly neutral-bullish." },
+    marketStructure: { score: 10, confidence: 60, reason: `Premium behaviour: ${prem.reason}.` },
+    bullishTotal,
+    bearishTotal,
+    neutralTotal,
     quality
   };
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// STRATEGY GENERATOR — institutional-signal-aware, never contradicts ICE
+// ─────────────────────────────────────────────────────────────────────────────
 export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreEngineResult): AiStrategy => {
   const levels = calculateSupportResistance(currentChain);
   const support = levels.find(l => l.type === "Support" && l.method === "Max OI")?.strikePrice || 0;
   const resistance = levels.find(l => l.type === "Resistance" && l.method === "Max OI")?.strikePrice || Infinity;
-  const underlyingValue = currentChain.find(r => (r.CE?.underlyingValue || r.PE?.underlyingValue))?.CE?.underlyingValue || 0;
-  
+  const underlyingValue =
+    currentChain.find(r => r.CE?.underlyingValue)?.CE?.underlyingValue ||
+    currentChain.find(r => r.PE?.underlyingValue)?.PE?.underlyingValue || 0;
   const maxPain = calculateMaxPain(currentChain);
 
+  // Primary bias from validated composite score
   let bias: "Bullish" | "Bearish" | "Neutral" = "Neutral";
   if (score.bullishTotal > score.bearishTotal && score.bullishTotal > score.neutralTotal) bias = "Bullish";
   else if (score.bearishTotal > score.bullishTotal && score.bearishTotal > score.neutralTotal) bias = "Bearish";
 
+  // ── VALIDATION LAYER (second line of defence) ─────────────────────────────
+  // Re-derive institutional bias independently and verify consistency.
+  // If any contradiction remains after the score override, force institutional.
+  const instData = getDominantInstitutionalBias(currentChain);
+  const instBiasLabel: "Bullish" | "Bearish" | "Neutral" =
+    instData.bias === "bullish" ? "Bullish" : instData.bias === "bearish" ? "Bearish" : "Neutral";
+
+  const validatedBias: "Bullish" | "Bearish" | "Neutral" =
+    instBiasLabel !== "Neutral" && instBiasLabel !== bias ? instBiasLabel : bias;
+
+  // ── Confidence ─────────────────────────────────────────────────────────────
+  const margin = Math.abs(score.bullishTotal - score.bearishTotal);
+  const sigTotal = score.bullishTotal + score.bearishTotal;
+  const confidence = Math.round(Math.min(95, Math.max(55, 55 + (sigTotal > 0 ? (margin / sigTotal) * 70 : 0))));
+
+  // ── Signal presence flags from Top-5 OI shifts ────────────────────────────
+  const shifts = analyzeOIShifts(currentChain);
+  const top5 = shifts.slice(0, 5);
+  const hasLongBuildUp   = top5.some(s => s.type === "Long Build-up");
+  const hasFreshPutWrite = top5.some(s => s.type === "Fresh Put Writing");
+  // Call Unwinding in CE = bears covering (Short Covering proxy)
+  const hasShortCovering = top5.some(s => s.type === "Call Unwinding");
+  const hasFreshCallWrite= top5.some(s => s.type === "Fresh Call Writing");
+  // Put Unwinding in PE = bulls exiting (Long Unwinding proxy)
+  const hasLongUnwinding = top5.some(s => s.type === "Put Unwinding");
+
+  // ── Strategy, entries, reasoning defaults ─────────────────────────────────
   let strategy = "Iron Condor / Short Strangle";
+  let bestStrategy = "Delta Neutral Strategies";
+  let conservativeApproach = "Iron Condor";
+  let aggressiveApproach = "Short Straddle with tight SL";
   let entry = `Around ${underlyingValue}`;
   let confRule = "Wait for VIX to drop or IV crush before entry.";
   let sl = "Close beyond Support/Resistance";
   let t1 = `Support ${support}`;
-  let t2 = `Resistance ${resistance !== Infinity ? resistance : 'N/A'}`;
+  let t2 = `Resistance ${resistance !== Infinity ? resistance : "N/A"}`;
   let risk = "Defined risk on condor wings.";
   let reward = "Theta decay collection.";
   let rr = "1:1";
-  let confidence = 65;
-  let reasons = ["PCR is relatively neutral.", "Lack of decisive Smart Money skew.", "Market trading near center of Max Pain range."];
-  // avoidTradeZone will be calculated dynamically
-  
-  let instConclusion = {
-    marketBias: "Range-Bound / Neutral",
-    confidence: 65,
-    keyReasons: ["Balanced OI", "No major Smart Money flow"],
-    bestStrategy: "Delta Neutral Strategies",
-    conservativeApproach: "Iron Condor",
-    aggressiveApproach: "Short Straddle with tight SL",
-    riskWarnings: ["Overnight gap risk", "Sudden IV spikes"],
-    explanation: "The option chain shows symmetrical writing on both sides, indicating market participants expect the underlying to consolidate around the current level."
-  };
+  let reasons: string[] = [
+    "PCR is relatively neutral.",
+    "Lack of decisive Smart Money skew.",
+    "Market trading near center of Max Pain range."
+  ];
+  let keyReasons: string[] = ["Balanced OI", "No major Smart Money flow"];
+  let riskWarnings: string[] = ["Overnight gap risk", "Sudden IV spikes"];
+  let marketBiasLabel = "Range-Bound / Neutral";
+  let explanation = "The option chain shows symmetrical writing on both sides, indicating market participants expect the underlying to consolidate around the current level.";
 
-  if (bias === "Bullish") {
-    strategy = "Bull Call Spread / Naked Put Sell";
+  if (validatedBias === "Bullish") {
+    // ── Bullish strategies — NEVER use Bear Call Spread here ──────────────
+    marketBiasLabel = hasLongBuildUp && hasShortCovering
+      ? "Strong Bullish"
+      : hasFreshPutWrite && hasShortCovering
+      ? "Bullish"
+      : "Bullish";
+
+    if (confidence >= 80) {
+      strategy = "Call Buy";
+      bestStrategy = "Call Buy";
+      conservativeApproach = "Bull Put Spread";
+      aggressiveApproach = "Buy ATM Calls";
+    } else if (confidence >= 70) {
+      strategy = "Bull Call Spread";
+      bestStrategy = "Bull Call Spread";
+      conservativeApproach = "Bull Put Spread";
+      aggressiveApproach = "Cash Long on breakout";
+    } else {
+      strategy = "Bull Put Spread";
+      bestStrategy = "Bull Put Spread";
+      conservativeApproach = "Sell out-of-the-money Puts";
+      aggressiveApproach = "Bull Call Spread";
+    }
+
     entry = `On dips near ${support > 0 ? support : underlyingValue * 0.99}`;
-    confRule = "Wait for 15-min candle close above the VWAP.";
-    sl = `${support > 0 ? support * 0.99 : 'N/A'} (Daily Close basis)`;
-    t1 = `${maxPain > underlyingValue ? maxPain : underlyingValue * 1.01}`;
-    t2 = `${resistance !== Infinity ? resistance : underlyingValue * 1.02}`;
+    confRule = "Wait for 15-min candle close above VWAP.";
+    sl = `${support > 0 ? (support * 0.99).toFixed(0) : "N/A"} (Daily Close basis)`;
+    t1 = `${maxPain > underlyingValue ? maxPain : (underlyingValue * 1.01).toFixed(0)}`;
+    t2 = `${resistance !== Infinity ? resistance : (underlyingValue * 1.02).toFixed(0)}`;
     risk = "Max loss capped to premium paid (Spread).";
     reward = "Defined high probability upside.";
     rr = "1:2.5";
-    confidence = score.pcr.confidence * 0.5 + 40;
-    reasons = ["PCR indicates oversold or bullish build-up.", "Smart Money Call buying / Put writing detected.", "Price holding strongly above major OI Support."];
-    // avoidTradeZone removed from here
-    instConclusion = {
-      marketBias: "Bullish",
-      confidence: confidence,
-      keyReasons: ["Strong Put base", "Bullish Smart Money flow"],
-      bestStrategy: "Bull Call Spread",
-      conservativeApproach: "Sell out-of-the-money Puts",
-      aggressiveApproach: "Buy ATM Calls",
-      riskWarnings: ["Global macro shocks", "Unexpected resistance rejection"],
-      explanation: "Aggressive Put writing and long build-ups in calls suggest institutional players are positioning for a breakout or steady climb."
-    };
-  } else if (bias === "Bearish") {
-    strategy = "Bear Put Spread / Naked Call Sell";
+
+    reasons = [
+      hasLongBuildUp   ? "Long Build-up: Buyers aggressively adding positions (OI ↑ + Premium ↑)." : "",
+      hasFreshPutWrite ? "Fresh Put Writing: Institutions writing puts — strong support being built." : "",
+      hasShortCovering ? "Short Covering: Bears exiting — potential squeeze upward." : "",
+      `PCR ${calculatePCR(currentChain).toFixed(2)} — ${calculatePCR(currentChain) > 1.2 ? "bullish support base" : "neutral to bullish"}.`,
+      `Price holding near support at ${support > 0 ? support : "N/A"}.`
+    ].filter(Boolean);
+
+    keyReasons = [
+      hasLongBuildUp   ? "Long Build-up dominant" : "Bullish OI flow",
+      hasFreshPutWrite ? "Fresh Put Writing = institutional support" : "Bullish Smart Money",
+      hasShortCovering ? "Short Covering in progress" : "Strong support base"
+    ];
+
+    riskWarnings = [
+      "Global macro shock risk",
+      `Unexpected resistance rejection at ${resistance !== Infinity ? resistance : "upper range"}`
+    ];
+
+    explanation = `Dominant institutional signals: ${[
+      hasLongBuildUp   && "Long Build-up",
+      hasFreshPutWrite && "Fresh Put Writing",
+      hasShortCovering && "Short Covering"
+    ].filter(Boolean).join(", ")}. Institutions are positioning for upside.${
+      hasLongBuildUp && hasFreshPutWrite
+        ? " Long Build-up combined with Fresh Put Writing indicates strong bullish conviction — put writers are providing a floor while call buyers are driving momentum."
+        : ""
+    }`;
+
+  } else if (validatedBias === "Bearish") {
+    marketBiasLabel = hasFreshCallWrite && hasLongUnwinding ? "Strong Bearish" : "Bearish";
+
+    if (confidence >= 80) {
+      strategy = "Bear Put Spread";
+      bestStrategy = "Bear Put Spread";
+      conservativeApproach = "Sell out-of-the-money Calls";
+      aggressiveApproach = "Buy ITM Puts";
+    } else if (confidence >= 70) {
+      strategy = "Bear Put Spread / Naked Call Sell";
+      bestStrategy = "Bear Put Spread";
+      conservativeApproach = "Sell out-of-the-money Calls";
+      aggressiveApproach = "Buy ATM Puts";
+    } else {
+      strategy = "Bear Call Spread";
+      bestStrategy = "Bear Call Spread";
+      conservativeApproach = "Sell OTM Calls";
+      aggressiveApproach = "Bear Put Spread";
+    }
+
     entry = `On rallies near ${resistance !== Infinity ? resistance : underlyingValue * 1.01}`;
     confRule = "Rejection wick on hourly timeframe near resistance.";
-    sl = `${resistance !== Infinity ? resistance * 1.01 : 'N/A'} (Daily Close basis)`;
-    t1 = `${maxPain < underlyingValue ? maxPain : underlyingValue * 0.99}`;
-    t2 = `${support > 0 ? support : underlyingValue * 0.98}`;
+    sl = `${resistance !== Infinity ? (resistance * 1.01).toFixed(0) : "N/A"} (Daily Close basis)`;
+    t1 = `${maxPain < underlyingValue ? maxPain : (underlyingValue * 0.99).toFixed(0)}`;
+    t2 = `${support > 0 ? support : (underlyingValue * 0.98).toFixed(0)}`;
     risk = "Limited to premium paid.";
     reward = "High delta downside gains.";
     rr = "1:2.5";
-    confidence = score.pcr.confidence * 0.5 + 40;
-    reasons = ["PCR indicates overbought or bearish build-up.", "Smart Money Call writing / Put buying detected.", "Price struggling against major OI Resistance."];
-    // avoidTradeZone removed from here
-    instConclusion = {
-      marketBias: "Bearish",
-      confidence: confidence,
-      keyReasons: ["Call writing dominance", "Bearish Smart Money anomalies"],
-      bestStrategy: "Bear Put Spread",
-      conservativeApproach: "Sell out-of-the-money Calls",
-      aggressiveApproach: "Buy ITM Puts",
-      riskWarnings: ["Short squeeze potential", "Sudden bounce from support"],
-      explanation: "Heavy call writing across multiple strikes indicates institutions are capping the upside, expecting a downward drift."
-    };
+
+    reasons = [
+      hasFreshCallWrite ? "Fresh Call Writing: Institutions writing calls — resistance being reinforced." : "",
+      hasLongUnwinding  ? "Long Unwinding: Bulls closing positions — upward momentum fading." : "",
+      `PCR ${calculatePCR(currentChain).toFixed(2)} — ${calculatePCR(currentChain) < 0.8 ? "bearish pressure dominant" : "neutral to bearish"}.`,
+      `Price approaching resistance at ${resistance !== Infinity ? resistance : "N/A"}.`
+    ].filter(Boolean);
+
+    keyReasons = [
+      hasFreshCallWrite ? "Fresh Call Writing = institutional cap" : "Bearish OI flow",
+      hasLongUnwinding  ? "Long Unwinding in progress" : "Bearish Smart Money"
+    ];
+
+    riskWarnings = [
+      "Short squeeze potential",
+      `Sudden bounce from support at ${support > 0 ? support : "lower range"}`
+    ];
+
+    explanation = `Dominant institutional signals: ${[
+      hasFreshCallWrite && "Fresh Call Writing",
+      hasLongUnwinding  && "Long Unwinding"
+    ].filter(Boolean).join(", ")}. Institutions are capping the upside. Heavy call writing across strikes indicates a bearish distribution phase.`;
   }
 
-  let expectedRangeLower = support > 0 ? support : underlyingValue * 0.98;
-  let expectedRangeUpper = resistance !== Infinity ? resistance : underlyingValue * 1.02;
-  let rangeWidth = expectedRangeUpper - expectedRangeLower;
-  
-  let maxAllowedWidth = underlyingValue > 40000 ? 200 : 80;
-  let maxWidth = Math.min(maxAllowedWidth, rangeWidth * 0.25);
-  
+  // ── Avoid Trade Zone ──────────────────────────────────────────────────────
+  const expectedRangeLower = support > 0 ? support : underlyingValue * 0.98;
+  const expectedRangeUpper = resistance !== Infinity ? resistance : underlyingValue * 1.02;
+  const rangeWidth = expectedRangeUpper - expectedRangeLower;
+
+  const maxAllowedWidth = underlyingValue > 40000 ? 200 : 80;
+  const maxWidth = Math.min(maxAllowedWidth, rangeWidth * 0.25);
+
   let maxCombinedOI = 0;
   let maxCombinedOIStrike = underlyingValue;
   currentChain.forEach(r => {
-      const combined = (r.CE?.openInterest || 0) + (r.PE?.openInterest || 0);
-      if (combined > maxCombinedOI) {
-          maxCombinedOI = combined;
-          maxCombinedOIStrike = r.strikePrice;
-      }
+    const combined = (r.CE?.openInterest || 0) + (r.PE?.openInterest || 0);
+    if (combined > maxCombinedOI) { maxCombinedOI = combined; maxCombinedOIStrike = r.strikePrice; }
   });
-  
-  let atmStrike = currentChain.reduce((prev, curr) => (Math.abs(curr.strikePrice - underlyingValue) < Math.abs(prev.strikePrice - underlyingValue) ? curr : prev))?.strikePrice || underlyingValue;
-  
-  let isGammaPinned = Math.abs(atmStrike - maxPain) <= maxWidth && Math.abs(maxPain - maxCombinedOIStrike) <= maxWidth;
-  
-  let avoidTradeZone: import('./types').AvoidTradeZone;
+
+  const atmStrike = currentChain.reduce((prev, curr) =>
+    Math.abs(curr.strikePrice - underlyingValue) < Math.abs(prev.strikePrice - underlyingValue) ? curr : prev
+  )?.strikePrice || underlyingValue;
+
+  const isGammaPinned =
+    Math.abs(atmStrike - maxPain) <= maxWidth &&
+    Math.abs(maxPain - maxCombinedOIStrike) <= maxWidth;
+
+  let avoidTradeZone: import("./types").AvoidTradeZone;
 
   if (isGammaPinned) {
-      let pinCenter = (atmStrike + maxPain + maxCombinedOIStrike) / 3;
-      let lowerBound = Math.round(pinCenter - (maxWidth / 2));
-      let upperBound = Math.round(pinCenter + (maxWidth / 2));
-      
-      avoidTradeZone = {
-          lowerBound,
-          upperBound,
-          reason: "Whipsaw zone due to heavy gamma pinning and balanced OI.",
-          marketState: bias === "Neutral" ? "🔴 Avoid" : "🟡 Caution",
-          longEntryTrigger: `Wait for 15-min candle close above ${upperBound}`,
-          shortEntryTrigger: `Wait for 15-min candle close below ${lowerBound}`,
-          confirmationRule: "Wait for a 5-minute candle close outside the zone.",
-          analyticsReasoning: [
-              "Heavy Gamma at ATM",
-              `Max Pain located at ${maxPain}`,
-              `Highest Combined OI at ${maxCombinedOIStrike}`,
-              "Smart Money showing neutral/balanced flows inside this range"
-          ]
-      };
+    const pinCenter = (atmStrike + maxPain + maxCombinedOIStrike) / 3;
+    const lowerBound = Math.round(pinCenter - maxWidth / 2);
+    const upperBound = Math.round(pinCenter + maxWidth / 2);
+    avoidTradeZone = {
+      lowerBound, upperBound,
+      reason: "Whipsaw zone due to heavy gamma pinning and balanced OI.",
+      marketState: validatedBias === "Neutral" ? "🔴 Avoid" : "🟡 Caution",
+      longEntryTrigger:  `Wait for 15-min candle close above ${upperBound}`,
+      shortEntryTrigger: `Wait for 15-min candle close below ${lowerBound}`,
+      confirmationRule: "Wait for a 5-minute candle close outside the zone.",
+      analyticsReasoning: [
+        "Heavy Gamma at ATM",
+        `Max Pain located at ${maxPain}`,
+        `Highest Combined OI at ${maxCombinedOIStrike}`,
+        "Smart Money showing neutral/balanced flows inside this range"
+      ]
+    };
   } else {
-      avoidTradeZone = {
-          lowerBound: null,
-          upperBound: null,
-          reason: "No major Avoid Zone detected.",
-          marketState: "🟢 Trade Zone",
-          longEntryTrigger: `Enter near Support (${expectedRangeLower})`,
-          shortEntryTrigger: `Enter near Resistance (${expectedRangeUpper})`,
-          confirmationRule: "Wait for a 5-minute candle close confirming trend direction.",
-          analyticsReasoning: [
-              "No significant gamma pinning detected",
-              "Clear directional bias available"
-          ]
-      };
+    avoidTradeZone = {
+      lowerBound: null, upperBound: null,
+      reason: "No major Avoid Zone detected.",
+      marketState: "🟢 Trade Zone",
+      longEntryTrigger:  `Enter near Support (${expectedRangeLower})`,
+      shortEntryTrigger: `Enter near Resistance (${expectedRangeUpper})`,
+      confirmationRule: "Wait for a 5-minute candle close confirming trend direction.",
+      analyticsReasoning: [
+        "No significant gamma pinning detected",
+        "Clear directional bias available"
+      ]
+    };
   }
 
   return {
-    bias,
+    bias: validatedBias,
     qualityScore: Math.max(score.bullishTotal, score.bearishTotal, score.neutralTotal),
     expectedRange: {
       lowerBound: support > 0 ? support : underlyingValue * 0.98,
@@ -290,35 +529,43 @@ export const generateAiStrategy = (currentChain: OptionChainRow[], score: ScoreE
     confidence,
     reasons,
     avoidTradeZone,
-    institutionalConclusion: instConclusion
+    institutionalConclusion: {
+      marketBias: marketBiasLabel,
+      confidence,
+      keyReasons,
+      bestStrategy,
+      conservativeApproach,
+      aggressiveApproach,
+      riskWarnings,
+      explanation
+    }
   };
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Historical Similarity Engine (data-matching only — no changes)
+// ─────────────────────────────────────────────────────────────────────────────
 export const computeHistoricalSimilarity = (allData: MergedDailyData[], currentChain: OptionChainRow[]): HistoricalSimilarity => {
   const currentPcr = calculatePCR(currentChain);
-  
+
   let matches = 0;
   let bullish = 0;
   let bearish = 0;
   let neutral = 0;
   let returns: number[] = [];
   let topMatches: string[] = [];
-  
+
   allData.forEach((day, index) => {
     if (index === allData.length - 1) return;
     const dayPcr = calculatePCR(day.chain);
     if (Math.abs(dayPcr - currentPcr) < 0.15) {
       matches++;
       const nextDay = allData[index + 1];
-      const nextPcr = calculatePCR(nextDay.chain);
-      
-      const dayUnderlying = day.chain.find(r => r.CE?.underlyingValue)?.CE?.underlyingValue || 1;
+      const dayUnderlying  = day.chain.find(r => r.CE?.underlyingValue)?.CE?.underlyingValue || 1;
       const nextUnderlying = nextDay.chain.find(r => r.CE?.underlyingValue)?.CE?.underlyingValue || 1;
       const dailyReturn = ((nextUnderlying - dayUnderlying) / dayUnderlying) * 100;
       returns.push(dailyReturn);
-      
       if (topMatches.length < 5) topMatches.push(day.date);
-
       if (dailyReturn > 0.3) bullish++;
       else if (dailyReturn < -0.3) bearish++;
       else neutral++;
@@ -332,11 +579,7 @@ export const computeHistoricalSimilarity = (allData: MergedDailyData[], currentC
 
   return {
     matchedOccurrences: Math.max(matches, 3),
-    breakdown: {
-      bullish: Math.max(bullish, 1),
-      bearish: Math.max(bearish, 1),
-      neutral: Math.max(neutral, 1),
-    },
+    breakdown: { bullish: Math.max(bullish, 1), bearish: Math.max(bearish, 1), neutral: Math.max(neutral, 1) },
     averageNextDayMove: avgReturn > 0 ? `+${avgReturn.toFixed(2)}%` : `${avgReturn.toFixed(2)}%`,
     bestOutcome: `+${best.toFixed(2)}%`,
     worstOutcome: `${worst.toFixed(2)}%`,

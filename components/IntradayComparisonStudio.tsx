@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useRef, useMemo, useCallback } from "react";
+import React, { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import Papa from "papaparse";
 import jsPDF from "jspdf";
 import {
   Upload, Activity, TrendingUp, TrendingDown,
   BrainCircuit, Target, Shield, BarChart2, Zap, ArrowRight,
-  Download, Layers, BarChart, FileText,
+  Download, Layers, BarChart, FileText, FileSpreadsheet,
   ChevronDown, ChevronUp, RefreshCw, CheckCircle, XCircle,
   PieChart
 } from "lucide-react";
@@ -119,16 +119,23 @@ const parseOptionChainCSV = (text: string, fileName: string): ParsedFile => {
 
   // Try to detect underlying from filename
   const fnUpper = fileName.toUpperCase();
-  const knownSymbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX"];
-  for (const sym of knownSymbols) {
-    if (fnUpper.includes(sym)) { underlying = sym; break; }
+  const edMatch = fnUpper.match(/ED-([A-Z0-9_]+)-\d{1,2}-[A-Z]{3}/);
+  if (edMatch) {
+    underlying = edMatch[1];
+  } else {
+    const knownSymbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX"];
+    for (const sym of knownSymbols) {
+      if (fnUpper.includes(sym)) { underlying = sym; break; }
+    }
   }
 
   // Scan first 5 rows for metadata
   for (let i = 0; i < Math.min(rows.length, 6); i++) {
     const rowStr = (rows[i] || []).join(" ").toUpperCase();
-    const symMatch = rowStr.match(/UNDERLYING[:\s,-]+([A-Z]{3,15})/);
-    if (symMatch && !["INDEX", "VALUE", "NAME"].includes(symMatch[1])) underlying = symMatch[1];
+    if (underlying === "UNKNOWN") {
+      const symMatch = rowStr.match(/UNDERLYING[:\s,-]+([A-Z]{3,15})/);
+      if (symMatch && !["INDEX", "VALUE", "NAME"].includes(symMatch[1])) underlying = symMatch[1];
+    }
     const expMatch = rowStr.match(/\d{1,2}[-\s][A-Z]{3}[-\s]\d{2,4}/);
     if (expMatch) expiry = expMatch[0].replace(/\s/g, "-").toUpperCase();
   }
@@ -188,12 +195,17 @@ const parseOptionChainCSV = (text: string, fileName: string): ParsedFile => {
   const spot = atmRow ? atm + (atmRow.callLTP - atmRow.putLTP) : atm;
   const pcr = totalCEOI > 0 ? totalPEOI / totalCEOI : 0;
 
-  // Extract time from filename e.g. "0915" or "09-15"
-  const timeMatch = fileName.match(/(\d{4})(?![\d])/);
+  // Extract time from filename (last segment before .csv)
   let time = "N/A";
+  const timeMatch = fileName.match(/-([a-zA-Z0-9]+)\.csv$/i);
   if (timeMatch) {
-    const t = timeMatch[1];
-    time = `${t.slice(0, 2)}:${t.slice(2)}`;
+    time = timeMatch[1].toUpperCase();
+  } else {
+    const timeMatchOld = fileName.match(/(?<!20\d\d)(\d{4})(?![\d])/);
+    if (timeMatchOld) {
+      const t = timeMatchOld[1];
+      time = `${t.slice(0, 2)}:${t.slice(2)}`;
+    }
   }
 
   return { underlying, expiry, fileName, time, rows: optionRows, totalCEOI, totalPEOI, spot, atm, pcr };
@@ -490,7 +502,7 @@ export default function IntradayComparisonStudio() {
 
   const toggleSection = (n: number) => setExpandedSection(s => s === n ? null : n);
 
-  // ── Validate ──────────────────────────────────────────────────────────────
+  // ── Validate + Excel Save ─────────────────────────────────────────────────
   const validate = useCallback(() => {
     if (!prevFile || !currFile) { setValidationError("Please upload both files."); return; }
     if (prevFile.underlying !== currFile.underlying || prevFile.expiry !== currFile.expiry) {
@@ -499,6 +511,30 @@ export default function IntradayComparisonStudio() {
       return;
     }
     setValidationError(null);
+
+    // ── Excel Save: always fires on every Analyze click ──────────────────────
+    const instDataCurr = generateInstitutionalData(currFile.rows);
+    const payload = {
+      symbol: currFile.underlying,
+      time: currFile.time,
+      ce_writing:   +(instDataCurr.positioning.calls.writing).toFixed(1),
+      ce_buying:    +(instDataCurr.positioning.calls.buying).toFixed(1),
+      ce_unwinding: +(instDataCurr.positioning.calls.unwinding).toFixed(1),
+      ce_covering:  +(instDataCurr.positioning.calls.covering).toFixed(1),
+      pe_writing:   +(instDataCurr.positioning.puts.writing).toFixed(1),
+      pe_buying:    +(instDataCurr.positioning.puts.buying).toFixed(1),
+      pe_unwinding: +(instDataCurr.positioning.puts.unwinding).toFixed(1),
+      pe_covering:  +(instDataCurr.positioning.puts.covering).toFixed(1),
+    };
+    fetch("/api/export-excel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(d => {
+      if (d.success) console.log(`[Excel] Saved: ${d.fileName}`);
+      else console.warn(`[Excel] Save failed:`, d.error);
+    }).catch(e => console.error("[Excel] Network error:", e));
+
     setAnalyzed(true);
     setExpandedSection(null);
     setTimeout(() => {
@@ -718,6 +754,8 @@ export default function IntradayComparisonStudio() {
       `The expected trading zone is ${fmt(support)} to ${fmt(resistance)}. ` +
       `Ideal trading plan: ${bias === "Bullish" ? `Buy on dips toward ${fmt(support)}, targeting ${fmt(resistance)}` : bias === "Bearish" ? `Sell on rises toward ${fmt(resistance)}, targeting ${fmt(support)}` : `Range-trade between ${fmt(support)} and ${fmt(resistance)}`}.`;
   }
+
+  // (Excel save moved into validate() above so it fires on every Analyze click)
 
   // ── PDF Export — Institutional Research Report ──────────────────────────
   const exportPDF = useCallback(() => {
@@ -1490,12 +1528,21 @@ export default function IntradayComparisonStudio() {
             <Zap size={16} /> Analyze Intraday Changes
           </button>
           {analyzed && (
-            <button
-              onClick={exportPDF}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
-            >
-              <Download size={16} /> Export PDF
-            </button>
+            <>
+              <button
+                onClick={exportPDF}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
+              >
+                <Download size={16} /> Export PDF
+              </button>
+              <a
+                href={`/api/export-excel?symbol=${encodeURIComponent(currFile?.underlying || prevFile?.underlying || "UNKNOWN")}`}
+                download
+                className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold border border-white/10 bg-[#10b981]/10 text-[#10b981] hover:bg-[#10b981]/20 transition-all"
+              >
+                <FileSpreadsheet size={16} /> Export Historical Excel
+              </a>
+            </>
           )}
           {(prevFile || currFile) && (
             <button
@@ -2672,12 +2719,21 @@ export default function IntradayComparisonStudio() {
                 <p className="text-sm text-[var(--text-secondary)] mb-4 leading-relaxed">
                   Export the complete institutional intraday comparison report to PDF. The report includes all 16 sections: Executive Summary, PCR Analysis, Spot Movement, Volume/OI Breakdowns, Strike Behaviour Matrix, Institutional Activity, Smart Money Shifts, Trade Book, Strategy and AI Conclusion.
                 </p>
-                <button
-                  onClick={exportPDF}
-                  className="btn-primary flex items-center gap-2 px-6 py-3 text-sm font-bold"
-                >
-                  <Download size={16} /> Export Full Report as PDF
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={exportPDF}
+                    className="btn-primary flex items-center gap-2 px-6 py-3 text-sm font-bold"
+                  >
+                    <Download size={16} /> Export Full Report as PDF
+                  </button>
+                  <a
+                    href={`/api/export-excel?symbol=${encodeURIComponent(currFile?.underlying || prevFile?.underlying || "UNKNOWN")}`}
+                    download
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold border border-white/10 bg-[#10b981]/10 text-[#10b981] hover:bg-[#10b981]/20 transition-all"
+                  >
+                    <FileSpreadsheet size={16} /> Export Historical Excel
+                  </a>
+                </div>
               </div>
               <div className="bg-[#161925]/70 rounded-xl p-4 border border-white/5 text-sm min-w-[200px]">
                 <p className="font-bold text-white mb-2">{currFile.underlying} · {currFile.expiry}</p>

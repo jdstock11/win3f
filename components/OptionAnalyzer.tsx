@@ -20,6 +20,7 @@ import CustomStrategyBuilder from "./CustomStrategyBuilder";
 import InstitutionalDecisionEngine from "./InstitutionalDecisionEngine";
 import IntradayComparison from "./IntradayComparison";
 import IntradayInstitutionalComparisonEngine from "./IntradayInstitutionalComparisonEngine";
+import { generateInstitutionalData } from "./institutional-analytics";
 
 // --- Helper Components ---
 
@@ -131,6 +132,13 @@ export default function OptionAnalyzer() {
     let expiry = "UNKNOWN EXPIRY";
 
     const detectSymbol = () => {
+      // PRIORITY 0: ED-STOCKNAME-DD-Mon pattern in filename (most reliable for NSE files)
+      // e.g. option-chain-ED-INDHOTEL-28-Jul-2026-10.csv → INDHOTEL
+      const edMatch = filename.toUpperCase().match(/ED-([A-Z0-9]+)-\d{1,2}-[A-Z]{3}/);
+      if (edMatch && edMatch[1]) {
+        return edMatch[1];
+      }
+
       // 1-6: Check CSV Rows
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i] || [];
@@ -153,16 +161,20 @@ export default function OptionAnalyzer() {
         }
       }
 
-      // 7: Filename fallback
-      const filenameMatch = filename.toUpperCase().match(/-(NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY|SENSEX|[A-Z]{3,15})-/);
-      if (filenameMatch && filenameMatch[1]) {
-        return filenameMatch[1];
-      }
-
+      // 7: Known index symbols anywhere in filename
       const symbols = ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "SENSEX", "RELIANCE", "HDFCBANK", "TCS", "INFY", "SBIN"];
       for (const s of symbols) {
         if (filename.toUpperCase().includes(s)) {
           return s;
+        }
+      }
+
+      // 8: Generic fallback — any word between dashes (skip common non-symbols)
+      const skipWords = ["OPTION", "CHAIN", "NSE", "BSE", "ED", "DATA", "OC", "FO"];
+      const parts = filename.toUpperCase().replace(/\.CSV$/i, "").split("-");
+      for (const part of parts) {
+        if (part.length >= 3 && part.length <= 15 && /^[A-Z]+$/.test(part) && !skipWords.includes(part)) {
+          return part;
         }
       }
 
@@ -243,6 +255,39 @@ export default function OptionAnalyzer() {
       data: parsedData,
       atm: currentAtm,
     };
+
+    // ── Auto-save to Historical Excel (same format as Intraday Comparison Studio) ──
+    try {
+      const instData = generateInstitutionalData(parsedData);
+      // Extract time slot from filename: last segment before .csv
+      let timeSlot = "N/A";
+      const timeMatch = filename.match(/-([a-zA-Z0-9]+)\.csv$/i);
+      if (timeMatch) {
+        timeSlot = timeMatch[1].toUpperCase();
+      }
+      const excelPayload = {
+        symbol,
+        time: timeSlot,
+        ce_writing:   +(instData.positioning.calls.writing).toFixed(1),
+        ce_buying:    +(instData.positioning.calls.buying).toFixed(1),
+        ce_unwinding: +(instData.positioning.calls.unwinding).toFixed(1),
+        ce_covering:  +(instData.positioning.calls.covering).toFixed(1),
+        pe_writing:   +(instData.positioning.puts.writing).toFixed(1),
+        pe_buying:    +(instData.positioning.puts.buying).toFixed(1),
+        pe_unwinding: +(instData.positioning.puts.unwinding).toFixed(1),
+        pe_covering:  +(instData.positioning.puts.covering).toFixed(1),
+      };
+      fetch("/api/export-excel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(excelPayload),
+      }).then(r => r.json()).then(d => {
+        if (d.success) console.log(`[Excel] Institutional Terminal saved: ${d.fileName}`);
+        else console.warn(`[Excel] Save failed:`, d.error);
+      }).catch(e => console.error("[Excel] Network error:", e));
+    } catch (e) {
+      console.error("[Excel] Failed to compute institutional data for save:", e);
+    }
 
     setDatasets(prev => [...prev, newDataset]);
     if (!activeDatasetId) setActiveDatasetId(newDataset.id);
@@ -619,6 +664,15 @@ export default function OptionAnalyzer() {
             <button className="bg-[#1a1d2d] hover:bg-[#252a40] text-white px-4 py-2 rounded-lg border border-[var(--border-color)] transition-all flex items-center gap-2 shadow-md" onClick={exportPDF}>
               <Download size={16} /> <span className="hidden sm:inline">Export PDF</span>
             </button>
+            {activeDataset && (
+              <a
+                href={`/api/export-excel?symbol=${encodeURIComponent(activeDataset.symbol)}`}
+                download
+                className="bg-[#10b981]/10 hover:bg-[#10b981]/20 text-[#10b981] px-4 py-2 rounded-lg border border-[#10b981]/30 transition-all flex items-center gap-2 shadow-md font-semibold"
+              >
+                <FileSpreadsheet size={16} /> <span className="hidden sm:inline">Export Historical Excel</span>
+              </a>
+            )}
           </div>
         </div>
       </div>
