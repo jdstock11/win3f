@@ -36,6 +36,22 @@ export interface InstitutionalPositioning {
   puts: { writing: number; buying: number; unwinding: number; covering: number };
 }
 
+// Volume PCR Calculation
+export const calculateVolumePCR = (data: OptionRow[]) => {
+  let totalCEVol = 0, totalPEVol = 0;
+  data.forEach(r => {
+    totalCEVol += r.callVol || 0;
+    totalPEVol += r.putVol || 0;
+  });
+  
+  const value = totalCEVol > 0 ? totalPEVol / totalCEVol : 0;
+  let trend = "Neutral";
+  if (value < 0.6) trend = "Bullish";
+  else if (value > 1.6) trend = "Bearish";
+  
+  return { value, trend, totalCEVol, totalPEVol };
+};
+
 // Derive signals exactly as requested
 export const classifySignal = (oiChange: number | undefined, ltpChange: number | undefined): Signal => {
   if (oiChange === undefined || ltpChange === undefined || isNaN(oiChange) || isNaN(ltpChange)) return "Insufficient data to classify";
@@ -175,9 +191,24 @@ export const generateDecisionEngine = (data: OptionRow[], atm: number) => {
   const pcr = tpOI / (tcOI || 1);
   const isSufficientData = data.some(r => r.callOIChange !== undefined && !isNaN(r.callOIChange));
   
-  let score = 50;
-  if (pcr > 1.2) score += 15; else if (pcr < 0.8) score -= 15;
-  if (maxPut.strike > maxCall.strike) score += 15; // aggressive bull
+  const { value: volPcrValue } = calculateVolumePCR(data);
+
+  // New Weighted Score Logic
+  let oiPcrScore = 50;
+  if (pcr > 1.2) oiPcrScore = 80; else if (pcr < 0.8) oiPcrScore = 20;
+
+  let volPcrScore = 50;
+  if (volPcrValue < 0.6) volPcrScore = 80; else if (volPcrValue > 1.6) volPcrScore = 20;
+
+  let oiBuildupScore = 50;
+  if (maxPut.strike > maxCall.strike) oiBuildupScore = 80; else if (maxCall.strike > maxPut.strike) oiBuildupScore = 40;
+
+  let volumeAnalysisScore = 50;
+  let ivAnalysisScore = 50;
+  let smartMoneyScore = isSufficientData ? (oiBuildupScore > 50 ? 70 : 30) : 50;
+
+  let score = (oiPcrScore * 0.25) + (volPcrScore * 0.20) + (oiBuildupScore * 0.20) + (volumeAnalysisScore * 0.15) + (ivAnalysisScore * 0.10) + (smartMoneyScore * 0.10);
+  score = Math.round(score);
   
   let expectedRangeLower = maxPut.strike || atm * 0.98;
   let expectedRangeUpper = maxCall.strike || atm * 1.02;
@@ -223,15 +254,18 @@ export const generateDecisionEngine = (data: OptionRow[], atm: number) => {
     pcrSuggestedAction: pcr > 1.2 ? "Buy on dips" : pcr < 0.8 ? "Sell on rallies" : "Iron Condor / Range strategies",
     
     intradayScore: {
-      pcr: pcr > 1.2 ? 80 : pcr < 0.8 ? 20 : 50,
-      oi: score,
-      smartMoney: isSufficientData ? (score > 50 ? 70 : 30) : 50,
-      volume: 50,
+      oiPcr: oiPcrScore,
+      volumePcr: volPcrScore,
+      oiBuildup: oiBuildupScore,
+      volumeAnalysis: volumeAnalysisScore,
+      ivAnalysis: ivAnalysisScore,
+      smartMoney: smartMoneyScore,
       momentum: isSufficientData ? (score > 50 ? 60 : 40) : 50,
       support: 80,
       resistance: 80,
       totalScore: score
     },
+    volPcrValue,
 
     tradeTrigger: {
       longTrigger: `Price crosses and holds above ${avoidZone ? avoidZone.upper : expectedRangeLower + (atm * 0.001)}`,
@@ -258,12 +292,14 @@ export const generateDecisionEngine = (data: OptionRow[], atm: number) => {
       invalidation: `Close beyond ${bias === "Bullish" ? 'Support' : bias === 'Bearish' ? 'Resistance' : 'Max Pain range'}`,
       tradeChecklist: [
         "Verified Institutional PCR",
+        "Volume PCR Confirmed",
         "Confirmed OI Shifts",
         "Smart Money Alignment Checked",
         "Risk-to-Reward minimum 1:2"
       ],
       reasons: [
         `PCR is ${pcr.toFixed(2)}`,
+        `Volume PCR is ${volPcrValue.toFixed(2)}`,
         `Major resistance at ${maxCall.strike}`,
         `Major support at ${maxPut.strike}`,
         avoidZone ? "Gamma pinning detected" : "Clean directional flow expected"

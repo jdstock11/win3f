@@ -20,7 +20,7 @@ import CustomStrategyBuilder from "./CustomStrategyBuilder";
 import InstitutionalDecisionEngine from "./InstitutionalDecisionEngine";
 import IntradayComparison from "./IntradayComparison";
 import IntradayInstitutionalComparisonEngine from "./IntradayInstitutionalComparisonEngine";
-import { generateInstitutionalData } from "./institutional-analytics";
+import { generateInstitutionalData, calculateVolumePCR } from "./institutional-analytics";
 
 // --- Helper Components ---
 
@@ -478,6 +478,11 @@ export default function OptionAnalyzer() {
     return { text: "Neutral", color: "#f59e0b" }; // var(--warning)
   }, [totalPCR]);
 
+  const volumePcrData = useMemo(() => {
+    if (!activeDataset) return { value: 0, trend: "Neutral" };
+    return calculateVolumePCR(activeDataset.data);
+  }, [activeDataset]);
+
   // Comparison Data Logic for Rollover
   const comparisonChartData = useMemo(() => {
     if (!activeDataset || !compareDataset) return [];
@@ -704,7 +709,7 @@ export default function OptionAnalyzer() {
         {activeTab === "Overview" && (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500">
             {/* Status Panel */}
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 p-5 bg-[#161925]/40 rounded-2xl border border-[var(--border-color)]">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-5 bg-[#161925]/40 rounded-2xl border border-[var(--border-color)]">
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-1">Total CE OI</p>
                 <p className="font-bold text-lg text-[#ef4444]">{formatNum(totalCallOI)}</p>
@@ -716,6 +721,13 @@ export default function OptionAnalyzer() {
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-1">Total PCR Ratio</p>
                 <p className="font-bold text-lg" style={{ color: pcrSentiment.color }}>{totalPCR.toFixed(3)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--text-secondary)] mb-1">Volume PCR</p>
+                <p className="font-bold text-lg flex items-center gap-2" style={{ color: volumePcrData.trend === 'Bullish' ? '#10b981' : volumePcrData.trend === 'Bearish' ? '#ef4444' : '#f59e0b' }}>
+                  {volumePcrData.value.toFixed(3)}
+                  <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-current opacity-80">{volumePcrData.trend}</span>
+                </p>
               </div>
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-1">Total Strikes Parsed</p>

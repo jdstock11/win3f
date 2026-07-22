@@ -11,7 +11,7 @@ import {
   PieChart
 } from "lucide-react";
 
-import { generateInstitutionalData } from "./institutional-analytics";
+import { generateInstitutionalData, calculateVolumePCR } from "./institutional-analytics";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -525,6 +525,7 @@ export default function IntradayComparisonStudio() {
       pe_buying:    +(instDataCurr.positioning.puts.buying).toFixed(1),
       pe_unwinding: +(instDataCurr.positioning.puts.unwinding).toFixed(1),
       pe_covering:  +(instDataCurr.positioning.puts.covering).toFixed(1),
+      volume_pcr:   +(calculateVolumePCR(currFile.rows).value).toFixed(3),
     };
     fetch("/api/export-excel", {
       method: "POST",
@@ -651,12 +652,18 @@ export default function IntradayComparisonStudio() {
     // Strategy
     const strategy = generateStrategy(bias, expZoneLow, expZoneHigh, currFile.atm, currFile.pcr);
 
+    // Volume PCR calculation
+    const prevVolPcrData = calculateVolumePCR(prevFile.rows);
+    const currVolPcrData = calculateVolumePCR(currFile.rows);
+    const volumePCRChange = currVolPcrData.value - prevVolPcrData.value;
+
     // AI conclusion
-    const conclusion = generateConclusion(bias, prevFile, currFile, freshCEWrite, freshPEWrite, callBuying, putBuying, longUnwind, shortCover, spotDiff, atmShift, pcrChange, expZoneLow, expZoneHigh);
+    const conclusion = generateConclusion(bias, prevFile, currFile, freshCEWrite, freshPEWrite, callBuying, putBuying, longUnwind, shortCover, spotDiff, atmShift, pcrChange, expZoneLow, expZoneHigh, prevVolPcrData, currVolPcrData, volumePCRChange);
 
     return {
       diffRows, bias, biasConf, pcrTrend, pcrChange, spotDiff, atmShift,
       totalCEOIDiff, totalPEOIDiff, totalCEAdded, totalPEAdded,
+      prevVolPcrData, currVolPcrData, volumePCRChange,
       top10CEVolInc, top10PEVolInc,
       top10CEOIInc, top10PEOIInc, top10CEOIDec, top10PEOIDec,
       top10CEPremInc, top10PEPremInc, top10CEPremDec, top10PEPremDec,
@@ -731,7 +738,8 @@ export default function IntradayComparisonStudio() {
     fcw: DiffRow[], fpw: DiffRow[], cb: DiffRow[], pb: DiffRow[],
     lu: DiffRow[], sc: DiffRow[],
     spotDiff: number, atmShift: number, pcrChange: number,
-    support: number, resistance: number
+    support: number, resistance: number,
+    prevVolPcr: any, currVolPcr: any, volPcrChange: number
   ): string {
     const spotDir = spotDiff > 0 ? "higher" : spotDiff < 0 ? "lower" : "flat";
     const pcrDir = pcrChange > 0 ? "strengthened" : pcrChange < 0 ? "weakened" : "remained stable";
@@ -751,6 +759,7 @@ export default function IntradayComparisonStudio() {
       (pb.length > 0 ? `Put buying at ${pbStrike} indicates hedging or directional put longs, adding downside risk. ` : "") +
       (lu.length > 0 ? `Long unwinding was observed at ${luStrike}, suggesting longs reducing exposure. ` : "") +
       (sc.length > 0 ? `Short covering at ${scStrike} indicates trapped shorts exiting positions. ` : "") +
+      `Volume PCR is currently ${currVolPcr.value.toFixed(2)} (a change of ${volPcrChange > 0 ? '+' : ''}${volPcrChange.toFixed(2)}), supporting a ${currVolPcr.trend.toLowerCase()} participation effect. ` +
       `The expected trading zone is ${fmt(support)} to ${fmt(resistance)}. ` +
       `Ideal trading plan: ${bias === "Bullish" ? `Buy on dips toward ${fmt(support)}, targeting ${fmt(resistance)}` : bias === "Bearish" ? `Sell on rises toward ${fmt(resistance)}, targeting ${fmt(support)}` : `Range-trade between ${fmt(support)} and ${fmt(resistance)}`}.`;
   }
@@ -996,6 +1005,7 @@ export default function IntradayComparisonStudio() {
       ["Spot Difference",  fmtDiff(spotDiff),                 "ATM Shift",       fmtDiff(atmShift)],
       ["Previous PCR",     prevFile.pcr.toFixed(2),           "Current PCR",     currFile.pcr.toFixed(2)],
       ["PCR Change",       fmtPct(pcrChange),                 "PCR Trend",       pcrTrend],
+      ["Prev Vol PCR",     analysis.prevVolPcrData.value.toFixed(2), "Curr Vol PCR", analysis.currVolPcrData.value.toFixed(2)],
       ["Total CE OI Δ",    fmtDiff(totalCEOIDiff),            "Total PE OI Δ",   fmtDiff(totalPEOIDiff)],
       ["Market Bias",      bias,                              "Confidence",      biasConf],
     ];
@@ -1571,6 +1581,9 @@ export default function IntradayComparisonStudio() {
               <StatCard label="PCR Previous" value={prevFile.pcr.toFixed(2)} color="#94a3b8" />
               <StatCard label="PCR Current" value={currFile.pcr.toFixed(2)} color="#f8fafc" />
               <StatCard label="PCR Change" value={<DiffCell val={analysis.pcrChange} />} color="white" />
+              <StatCard label="Vol PCR Previous" value={analysis.prevVolPcrData.value.toFixed(2)} color="#94a3b8" />
+              <StatCard label="Vol PCR Current" value={analysis.currVolPcrData.value.toFixed(2)} color="#f8fafc" />
+              <StatCard label="Vol PCR Change" value={<DiffCell val={analysis.volumePCRChange} />} color="white" />
               <StatCard label="Market Bias" value={<Badge label={analysis.bias} type={analysis.bias === "Bullish" ? "bullish" : analysis.bias === "Bearish" ? "bearish" : "neutral"} />} />
             </div>
             <div className="bg-white/5 rounded-xl px-4 py-2 flex items-center gap-3 border border-white/10">
@@ -1788,6 +1801,40 @@ export default function IntradayComparisonStudio() {
                       </h3>
                       <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0, marginTop: "2px" }}>
                         {prevFile.time} → {currFile.time} · {currFile.underlying} · {currFile.expiry}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── CARD 0: Volume PCR Trend ───────────────── */}
+                <div style={{
+                  background: "rgba(22,25,37,0.75)", border: "1px solid rgba(139,92,246,0.15)",
+                  borderRadius: "16px", padding: "20px", marginBottom: "16px",
+                  display: "flex", flexDirection: "column", gap: "16px"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", boxShadow: "0 0 6px #8b5cf6" }} />
+                      <h4 style={{ color: "#fff", margin: 0, fontSize: "14px", fontWeight: 700, letterSpacing: "0.02em" }}>Volume PCR Trend</h4>
+                    </div>
+                    <Badge label={analysis.currVolPcrData.trend + " Shift"} type={analysis.currVolPcrData.trend === "Bullish" ? "bullish" : analysis.currVolPcrData.trend === "Bearish" ? "bearish" : "neutral"} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+                    <div>
+                      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", marginBottom: "4px" }}>Previous</p>
+                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#fff", margin: 0 }}>{analysis.prevVolPcrData.value.toFixed(2)}</p>
+                    </div>
+                    <div style={{ color: analysis.volumePCRChange > 0 ? "#10b981" : analysis.volumePCRChange < 0 ? "#ef4444" : "#64748b" }}>
+                      <ArrowRight size={20} style={{ transform: analysis.volumePCRChange > 0 ? "rotate(-45deg)" : analysis.volumePCRChange < 0 ? "rotate(45deg)" : "none" }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", marginBottom: "4px" }}>Current</p>
+                      <p style={{ fontSize: "16px", fontWeight: 700, color: "#fff", margin: 0 }}>{analysis.currVolPcrData.value.toFixed(2)}</p>
+                    </div>
+                    <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", marginBottom: "4px" }}>Difference</p>
+                      <p style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: analysis.volumePCRChange > 0 ? "#10b981" : analysis.volumePCRChange < 0 ? "#ef4444" : "#64748b" }}>
+                        {analysis.volumePCRChange > 0 ? "+" : ""}{analysis.volumePCRChange.toFixed(2)}
                       </p>
                     </div>
                   </div>
