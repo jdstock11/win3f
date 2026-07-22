@@ -76,6 +76,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
              const highIdx = headers.indexOf("high price") !== -1 ? headers.indexOf("high price") : headers.indexOf("high");
              const lowIdx = headers.indexOf("low price") !== -1 ? headers.indexOf("low price") : headers.indexOf("low");
              const closeIdx = headers.indexOf("close price") !== -1 ? headers.indexOf("close price") : headers.indexOf("close");
+             const openIdx = headers.indexOf("open price") !== -1 ? headers.indexOf("open price") : headers.indexOf("open");
              let hasOptions = false;
 
              for (let i = headerRowIndex + 1; i < data.length; i++) {
@@ -91,6 +92,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                 const high = highIdx !== -1 ? parseNumber(row[highIdx]) : 0;
                 const low = lowIdx !== -1 ? parseNumber(row[lowIdx]) : 0;
                 const close = closeIdx !== -1 ? parseNumber(row[closeIdx]) : 0;
+                const open = openIdx !== -1 ? parseNumber(row[openIdx]) : 0;
                 let expiry = expiryIdx !== -1 ? row[expiryIdx].trim() : "UNKNOWN";
 
                 if (!recordsMap.has(rawDate)) {
@@ -106,7 +108,8 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                       oiPCR: 0,
                       high,
                       low,
-                      close
+                      close,
+                      open
                    });
                 }
 
@@ -114,6 +117,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                 if (high > (rec.high || 0)) rec.high = high;
                 if (low > 0 && (!rec.low || low < rec.low)) rec.low = low;
                 rec.close = close; // just take the last close
+                if (open > 0 && (!rec.open || rec.open === 0)) rec.open = open;
                 
                 if (optType === "CE") {
                    rec.callVolume += vol;
@@ -141,6 +145,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
              const highIdx = headers.indexOf("high");
              const lowIdx = headers.indexOf("low");
              const closeIdx = headers.indexOf("close") !== -1 ? headers.indexOf("close") : headers.indexOf("ltp");
+             const openIdx = headers.indexOf("open");
 
              for (let i = headerRowIndex + 1; i < data.length; i++) {
                 const row = data[i];
@@ -152,6 +157,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                 const high = highIdx !== -1 ? parseNumber(row[highIdx]) : 0;
                 const low = lowIdx !== -1 ? parseNumber(row[lowIdx]) : 0;
                 const close = closeIdx !== -1 ? parseNumber(row[closeIdx]) : 0;
+                const open = openIdx !== -1 ? parseNumber(row[openIdx]) : 0;
 
                 if (!recordsMap.has(rawDate)) {
                    recordsMap.set(rawDate, {
@@ -167,7 +173,8 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                       isEquityOrFuture: true,
                       high,
                       low,
-                      close
+                      close,
+                      open
                    });
                 } else {
                    const rec = recordsMap.get(rawDate)!;
@@ -175,6 +182,7 @@ export const parseOptionChainCSV = (file: File): Promise<DailyPCRRecord[]> => {
                    if (high > (rec.high || 0)) rec.high = high;
                    if (low > 0 && (!rec.low || low < rec.low)) rec.low = low;
                    rec.close = close;
+                   if (open > 0 && (!rec.open || rec.open === 0)) rec.open = open;
                 }
              }
           } else {

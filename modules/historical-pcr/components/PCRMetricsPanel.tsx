@@ -44,6 +44,7 @@ export default function PCRMetricsPanel({ records }: { records: DailyPCRRecord[]
               <th className="p-3 text-sm font-semibold text-[var(--text-secondary)] whitespace-nowrap">Date</th>
               {records[0]?.isEquityOrFuture ? (
                  <>
+                    <th className="p-3 text-sm font-semibold text-[var(--text-secondary)] whitespace-nowrap">Open</th>
                     <th className="p-3 text-sm font-semibold text-[var(--text-secondary)] whitespace-nowrap">High</th>
                     <th className="p-3 text-sm font-semibold text-[var(--text-secondary)] whitespace-nowrap">Low</th>
                     <th className="p-3 text-sm font-semibold text-[var(--text-secondary)] whitespace-nowrap">Close</th>
@@ -72,6 +73,7 @@ export default function PCRMetricsPanel({ records }: { records: DailyPCRRecord[]
                   <td className="p-3 text-white text-sm whitespace-nowrap">{record.date}</td>
                   {record.isEquityOrFuture ? (
                      <>
+                        <td className="p-3 text-gray-300 text-sm whitespace-nowrap">{record.open?.toFixed(2) || '-'}</td>
                         <td className="p-3 text-green-400 text-sm whitespace-nowrap">{record.high?.toFixed(2) || '-'}</td>
                         <td className="p-3 text-red-400 text-sm whitespace-nowrap">{record.low?.toFixed(2) || '-'}</td>
                         <td className="p-3 font-bold text-white text-sm whitespace-nowrap">{record.close?.toFixed(2) || '-'}</td>

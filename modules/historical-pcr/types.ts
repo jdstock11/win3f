@@ -26,6 +26,7 @@ export interface DailyPCRRecord {
   high?: number;
   low?: number;
   close?: number;
+  open?: number;
 }
 
 export interface PCRDataset {
