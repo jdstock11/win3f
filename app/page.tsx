@@ -6,9 +6,10 @@ import MarketActivityScanner from "@/components/MarketActivityScanner";
 import WeeklyIntelligenceDashboard from "@/modules/weekly-intelligence/dashboard";
 import RolloverAnalyzer from "@/components/RolloverAnalyzer";
 import IntradayComparisonStudio from "@/components/IntradayComparisonStudio";
+import HistoricalPCRLab from "@/modules/historical-pcr";
 
 export default function Home() {
-  const [activeWorkflow, setActiveWorkflow] = useState<"institutional" | "market-activity" | "weekly-intelligence" | "rollover" | "intraday-studio">("institutional");
+  const [activeWorkflow, setActiveWorkflow] = useState<"institutional" | "market-activity" | "weekly-intelligence" | "rollover" | "intraday-studio" | "historical-pcr">("institutional");
 
   return (
     <main style={{ padding: "2rem", maxWidth: "1600px", margin: "0 auto" }}>
@@ -72,6 +73,16 @@ export default function Home() {
           >
             Intraday Comparison Studio
           </button>
+          <button
+            onClick={() => setActiveWorkflow("historical-pcr")}
+            className={`px-8 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${
+              activeWorkflow === "historical-pcr"
+                ? "bg-gradient-to-r from-[#10b981] to-[#3b82f6] text-white shadow-lg shadow-green-500/20"
+                : "bg-[#161925]/50 text-[var(--text-secondary)] hover:text-white border border-[var(--border-color)]"
+            }`}
+          >
+            Historical PCR Intelligence Lab
+          </button>
         </div>
       </header>
       
@@ -80,6 +91,7 @@ export default function Home() {
       {activeWorkflow === "weekly-intelligence" && <WeeklyIntelligenceDashboard />}
       {activeWorkflow === "rollover" && <RolloverAnalyzer />}
       {activeWorkflow === "intraday-studio" && <IntradayComparisonStudio />}
+      {activeWorkflow === "historical-pcr" && <HistoricalPCRLab />}
     </main>
   );
 }
